@@ -6,6 +6,14 @@
 > single-replica contract).  The steps below remain the deployment recipe;
 > the ADRs are the open work items that must close before this is production-
 > safe.
+>
+> **Cirrus dev deployment (`https://collab.cirrus.unleashlive.com`) is
+> automated via Terragrunt + GitHub Actions.**  See the runbook at
+> [`unleashlive/devops/terraform/opencode-collab/README.md`](https://github.com/unleashlive/devops/blob/master/terraform/opencode-collab/README.md)
+> for the bootstrap recipe, plus `.github/workflows/deploy-cirrus.yml` in
+> this repo for the deploy button.  The walkthrough below is the prod-
+> oriented narrative; it still describes the same shape (ECS Fargate + ALB
+> + EFS + Secrets Manager).
 
 This document walks an operator through standing up the collab fork behind
 `https://collab.unleashlive.com` on AWS ECS, plus answers two recurring

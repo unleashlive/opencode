@@ -1,0 +1,160 @@
+name: Deploy to cirrus
+
+# Manual deploys only.  No auto-deploy on push — operator clicks "Run workflow"
+# in the GitHub Actions UI.  ADR-0009 single-replica contract means every
+# deploy briefly takes the site offline; we don't want that triggered by
+# every WIP push to `collab`.
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Override image tag (defaults to sha-<commit>).  Leave blank for normal deploys."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-southeast-2
+  BUILD_ACCOUNT_ID: "306804155095"
+  CIRRUS_ACCOUNT_ID: "325684184082"
+  ECR_REPO: unleashlive/opencode-collab
+  ECS_CLUSTER: opencode-collab-cirrus
+  ECS_SERVICE: opencode-collab-cirrus
+  TASK_FAMILY: opencode-collab-cirrus
+  STAGE_DOMAIN: collab.cirrus.unleashlive.com
+  BUILD_PUBLISHER_ROLE: github-opencode-collab-publisher
+  CIRRUS_DEPLOY_ROLE: github-opencode-collab-cirrus-deploy
+
+jobs:
+  deploy:
+    name: Build + push + deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Resolve image tag
+        id: tag
+        run: |
+          if [[ -n "${{ inputs.image_tag }}" ]]; then
+            IMAGE_TAG="${{ inputs.image_tag }}"
+          else
+            IMAGE_TAG="sha-${GITHUB_SHA::12}"
+          fi
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          ECR_REGISTRY="${BUILD_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com"
+          echo "ecr_registry=${ECR_REGISTRY}" >> "$GITHUB_OUTPUT"
+          echo "image=${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      # ── Build account: ECR push ─────────────────────────────────────────────
+      - name: Configure AWS credentials (build account, ECR push)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.BUILD_ACCOUNT_ID }}:role/${{ env.BUILD_PUBLISHER_ROLE }}
+          aws-region: us-east-1
+          role-session-name: gh-opencode-collab-${{ github.run_id }}-build
+
+      - name: Login to ECR (build account)
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registries: ${{ env.BUILD_ACCOUNT_ID }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.tag.outputs.image }}
+            ${{ steps.tag.outputs.ecr_registry }}/${{ env.ECR_REPO }}:cirrus
+          cache-from: type=gha,scope=cirrus
+          cache-to: type=gha,scope=cirrus,mode=max
+
+      # ── Cirrus account: ECS deploy ──────────────────────────────────────────
+      - name: Configure AWS credentials (cirrus account, ECS deploy)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.CIRRUS_ACCOUNT_ID }}:role/${{ env.CIRRUS_DEPLOY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gh-opencode-collab-${{ github.run_id }}-cirrus
+
+      - name: Render new task definition
+        id: render
+        run: |
+          set -euo pipefail
+          # Fetch the active task definition, then swap the image to the new
+          # SHA-pinned tag.  We never edit the env block — secrets, volumes,
+          # etc. are owned by terragrunt and the deploy role can't change them.
+          aws ecs describe-task-definition \
+            --task-definition "${TASK_FAMILY}" \
+            --query 'taskDefinition' > current.json
+
+          jq --arg img "${{ steps.tag.outputs.image }}" '
+            .containerDefinitions[0].image = $img
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                  .compatibilities, .registeredAt, .registeredBy)
+          ' current.json > new.json
+
+          NEW_TD_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://new.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          echo "task_definition_arn=${NEW_TD_ARN}" >> "$GITHUB_OUTPUT"
+          echo "Registered ${NEW_TD_ARN}"
+
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster "${ECS_CLUSTER}" \
+            --service "${ECS_SERVICE}" \
+            --task-definition "${{ steps.render.outputs.task_definition_arn }}" \
+            --force-new-deployment \
+            > /dev/null
+          echo "Update issued; waiting for stable…"
+
+      - name: Wait for service stable
+        run: |
+          aws ecs wait services-stable \
+            --cluster "${ECS_CLUSTER}" \
+            --services "${ECS_SERVICE}"
+
+      - name: Health check
+        run: |
+          # Two minutes of retry — the ALB may take a moment to flip the new
+          # task into rotation after services-stable returns.
+          for i in $(seq 1 24); do
+            if curl -fsS -o /dev/null -w "%{http_code}" "https://${STAGE_DOMAIN}/healthz" | grep -q '^200$'; then
+              echo "healthz: OK"
+              exit 0
+            fi
+            echo "healthz attempt ${i}/24 not OK yet; sleeping 5s"
+            sleep 5
+          done
+          echo "::error::healthz never returned 200"
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Deploy to cirrus"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Image | \`${{ steps.tag.outputs.image }}\` |"
+            echo "| Task definition | \`${{ steps.render.outputs.task_definition_arn }}\` |"
+            echo "| URL | https://${STAGE_DOMAIN} |"
+            echo "| Commit | ${GITHUB_SHA} |"
+            echo "| Triggered by | @${GITHUB_ACTOR} |"
+          } >> "$GITHUB_STEP_SUMMARY"
