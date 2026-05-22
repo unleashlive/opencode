@@ -350,10 +350,13 @@ function cfg() {
     clientId: process.env["GITHUB_OAUTH_CLIENT_ID"] ?? "",
     clientSecret: process.env["GITHUB_OAUTH_CLIENT_SECRET"] ?? "",
     orgName: process.env["GITHUB_ORG_NAME"] ?? "",
-    serverToken: process.env["GITHUB_TOKEN"] ?? "",
     baseUrl: (process.env["OPENCODE_BASE_URL"] ?? "http://localhost:4096").replace(/\/$/, ""),
     sessionSecret: process.env["SESSION_SECRET"] ?? "dev-secret-change-me",
   }
+  // serverToken (GITHUB_TOKEN PAT) was removed in ADR-0005 Option B —
+  // every GitHub call now uses the caller's OAuth access token from their
+  // collab_auth_session row.  See packages/opencode/src/collab/github-auth.ts
+  // and workspace.ts / github-pr.ts.
 }
 
 // ── Migrations run once ─────────────────────────────────────────────────────────
@@ -505,7 +508,7 @@ function handleCollabRequestInner(req: Request): Promise<Response> | Response {
     const sess = getSession(req)
     if (!sess) return json({ error: "Unauthorised — please authenticate via /collab/auth/github" }, 401)
     const c = cfg()
-    return listOrgRepos({ orgName: c.orgName, serverToken: c.serverToken }).then((repos) => json(repos))
+    return listOrgRepos({ orgName: c.orgName, userToken: sess.githubAccessToken }).then((repos) => json(repos))
   }
 
   // GET /collab/me — current authenticated user info
@@ -662,13 +665,12 @@ async function handleOAuthCallback(req: Request, url: URL): Promise<Response> {
     const ghUser = await getGitHubUser(accessToken)
     console.error("[collab.auth] fetched github user", { login: ghUser.login, id: ghUser.id })
 
-    // Check org membership.  Pass the user's OAuth token so we can ask GitHub
-    // "is THIS person a member of <org>" directly (works for private members);
-    // we fall back to the server PAT check inside isOrgMember.
+    // Check org membership using the user's own OAuth token.  Works for
+    // private members and SSO-protected orgs because /user/memberships/orgs
+    // returns the requester's own membership regardless of org visibility.
     const isMember = await isOrgMember({
       orgName: c.orgName,
       githubLogin: ghUser.login,
-      serverToken: c.serverToken,
       userToken: accessToken,
     })
     if (!isMember) {
@@ -772,9 +774,7 @@ async function handleInviteRedeem(req: Request, token: string): Promise<Response
   const isMember = await isOrgMember({
     orgName: c.orgName,
     githubLogin: sess.githubLogin,
-    serverToken: c.serverToken,
-    // The user's own OAuth token is stashed in the session — pass it so the
-    // membership probe works for private members and SSO-protected orgs.
+    // The user's own OAuth token is stashed in the session.
     userToken: sess.githubAccessToken,
   })
   if (!isMember) {
@@ -866,7 +866,10 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
     if (created.repos.length > 0) {
       // Pass the session name + branch so initSessionWorkspace can check out
       // the branch and bake the metadata into the per-repo commit hook.
-      initSessionWorkspace(created.id, created.repos, created.name, created.branch)
+      // Token: the creator's OAuth access token (sess.githubAccessToken),
+      // which gets baked into the clone URL.  Subsequent push/pull operations
+      // reuse it via .git/config.  See ADR-0005 Option B.
+      initSessionWorkspace(created.id, created.repos, sess.githubAccessToken, created.name, created.branch)
         .then(() => preWarmNativeSession(created.id, warmupDirectory))
         .catch((err) => {
           console.error("[collab] workspace init failed:", err)
@@ -930,7 +933,7 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
   // GET /collab/session/:id/repos — list org repos
   if (req.method === "GET" && parts[3] === "repos") {
     const c = cfg()
-    const repos = await listOrgRepos({ orgName: c.orgName, serverToken: c.serverToken })
+    const repos = await listOrgRepos({ orgName: c.orgName, userToken: sess.githubAccessToken })
     return json(repos)
   }
 
@@ -976,7 +979,9 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
     if (caller.role !== "driver") return json({ error: "Forbidden — Drivers only" }, 403)
     const c = cfg()
     console.log("[collab.pr]", { sessionId, login: sess.githubLogin })
-    const result = await openCollabPullRequest(collabSession, c.baseUrl)
+    // PR creator = the Driver who clicked the button.  Their OAuth token
+    // does the push + PR-open call (ADR-0005 Option B).
+    const result = await openCollabPullRequest(collabSession, c.baseUrl, sess.githubAccessToken)
     if (!result.ok) {
       console.error("[collab.pr] failed", { sessionId, status: result.status, error: result.error })
       return json({ error: result.error }, result.status)

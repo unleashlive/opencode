@@ -10,9 +10,9 @@ services:
       - GITHUB_OAUTH_CLIENT_ID=${GITHUB_OAUTH_CLIENT_ID}
       - GITHUB_OAUTH_CLIENT_SECRET=${GITHUB_OAUTH_CLIENT_SECRET}
 
-      # GitHub org + server token (PAT with read:org scope)
+      # GitHub org (PAT removed in ADR-0005 Option B — each user's OAuth
+      # access token is used server-side for clone/push/PR/membership probes)
       - GITHUB_ORG_NAME=${GITHUB_ORG_NAME:-unleashlive}
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
 
       # Public base URL — use ngrok URL when testing remotely
       - OPENCODE_BASE_URL=${OPENCODE_BASE_URL:-http://localhost:4096}
