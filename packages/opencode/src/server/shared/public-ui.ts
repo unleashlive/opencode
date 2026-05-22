@@ -1,12 +1,19 @@
 // Static UI assets the browser fetches without app-managed credentials, e.g.
 // the manifest link in <head>. These bypass auth so the page can install/render
 // the manifest icons even when a server password is configured.
+//
+// Also includes /global/health: the SPA's ConnectionGate calls this on every
+// page load to verify the server is reachable.  Returning 401+www-authenticate
+// here causes the browser to pop its native basic-auth dialog, which fights
+// the collab OAuth flow.  The endpoint only returns {healthy, version} — not
+// sensitive — so it's safe to make public.
 export const PUBLIC_UI_PATHS = new Set<string>([
   "/",
   "/site.webmanifest",
   "/web-app-manifest-192x192.png",
   "/web-app-manifest-512x512.png",
   "/oc-theme-preload.js",
+  "/global/health",
 ])
 
 // SPA shell, collab UI routes, and static bundles must bypass HTTP basic auth

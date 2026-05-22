@@ -482,7 +482,11 @@ function handleCollabRequestInner(req: Request): Promise<Response> | Response {
       clientId: c.clientId,
       redirectUri: `${c.baseUrl}/collab/auth/github/callback`,
       state,
-      scopes: ["read:org", "read:user"],
+      // `repo` + `user:email` added by ADR-0005 Option B — the user's OAuth
+      // token now does server-side git clone/push/PR/list-repos work, so
+      // it needs repo-write scope.  (The default in buildOAuthUrl is the
+      // same — this is just an explicit local override that needs to match.)
+      scopes: ["read:org", "read:user", "user:email", "repo"],
     })
     const headers = new Headers({ Location: oauthUrl })
     headers.append(
