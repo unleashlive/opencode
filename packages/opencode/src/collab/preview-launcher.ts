@@ -783,6 +783,26 @@ function wireChildStreams(state: ActiveState): void {
         `[collab.preview/${state.collabSessionId}/${stream}] ${line.slice(0, 1024)}`,
       )
 
+      // Husky 8.x rewrites .git/hooks/ from its `prepare` lifecycle script
+      // (which pnpm runs as part of `pnpm install`).  This clobbers the
+      // prepare-commit-msg hook we installed at session init AND at boot
+      // sweep, so every subsequent commit silently drops the collab
+      // trailers (Collaborative-Commit + Co-authored-by) until something
+      // re-installs our hook.  Watch for the sentinel line and re-install
+      // immediately afterwards.  Idempotent + cheap — one file write.
+      if (/husky - Git hooks installed/i.test(line)) {
+        void import("./workspace").then((Workspace) =>
+          Workspace.reinstallCollabHookForRepo(state.collabSessionId, state.repoFullName).then(
+            () =>
+              console.log(
+                `[collab.preview] re-installed prepare-commit-msg hook after husky overwrote it (session=${state.collabSessionId} repo=${state.repoFullName})`,
+              ),
+          ),
+        ).catch((err) =>
+          console.warn("[collab.preview] post-husky hook reinstall failed:", err),
+        )
+      }
+
       // Status transition: "installing" → "running" on the readyPattern OR
       // on a built-in heuristic (the line mentions "Local:" / "ready" / "listening").
       // RegExp construction is validated at config-load (previewConfigForRepo
