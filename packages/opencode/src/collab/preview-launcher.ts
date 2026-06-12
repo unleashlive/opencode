@@ -906,12 +906,51 @@ export async function resumePreviewsOnBoot(): Promise<void> {
   }
   if (intents.length === 0) return
 
+  // Freshness cap.  Without this, a session whose intent landed days ago can
+  // get auto-resumed on every container boot indefinitely — and if that
+  // workspace's `.opencode-preview.json` is broken (stale config, missing
+  // build-script approvals, wrong NODE_OPTIONS) it crash-loops, eating
+  // memory until the kernel OOM-killer takes down the whole task.  We
+  // observed this on 2026-06-12: a days-old intent for cs_81500bbc… kept
+  // re-spawning a broken ng-serve on every boot, OOM-killing the task and
+  // bouncing it through 503.
+  //
+  // Cap = 24 h.  Resume is meant for cross-deploy continuity within a
+  // single working session ("operator clicked deploy 5 min ago, want the
+  // preview back when the new task lands"), not for resurrecting a wish
+  // from a previous workweek.  Driver can always press Launch manually
+  // for older sessions.
+  const MAX_INTENT_AGE_MS = 24 * 60 * 60 * 1000
+  const now = Date.now()
+  const stale: typeof intents = []
+  const fresh: typeof intents = []
+  for (const i of intents) {
+    if (now - i.at > MAX_INTENT_AGE_MS) stale.push(i)
+    else fresh.push(i)
+  }
+  if (stale.length > 0) {
+    console.log(
+      `[collab.preview] resumePreviewsOnBoot: ${stale.length} stale intent(s) past ${MAX_INTENT_AGE_MS}ms — clearing`,
+    )
+    for (const s of stale) {
+      try {
+        session.setPreviewIntent(s.collabSessionId, null)
+      } catch (err) {
+        console.warn(
+          `[collab.preview] resumePreviewsOnBoot: setPreviewIntent(null) threw for session=${s.collabSessionId}:`,
+          err,
+        )
+      }
+    }
+  }
+  if (fresh.length === 0) return
+
   // First-launch-wins constraint (one preview per container) means we pick
   // the most-recently active intent and ignore the rest.  If multiple
   // intents survived to disk, the rest will sit clear in the DB until a
   // Driver explicitly Launches one — we never auto-stomp a more-recent
   // wish in favour of a stale one.
-  const pick = intents[0]
+  const pick = fresh[0]
   console.log(
     `[collab.preview] resumePreviewsOnBoot: ${intents.length} intent(s) on disk; picking session=${pick.collabSessionId} repo=${pick.repoFullName} (most-recent)`,
   )
