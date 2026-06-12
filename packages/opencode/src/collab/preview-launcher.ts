@@ -54,7 +54,26 @@ const FRONTEND_DEFAULTS: PreviewConfig = {
 /** Idle window — no traffic for this long → SIGTERM. */
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000
 
-/** How often the idle sweep runs. */
+/** Absolute lifetime cap for a single preview run.  Angular CLI 19's `ng
+ *  serve` (wrapping Vite 6) has a slow heap leak under sustained traffic:
+ *  Vite's optimizeDeps cache rebundles on every new route entry and doesn't
+ *  release the previous generation, so RAM ratchets up by hundreds of MB
+ *  per hour.  We observed the 16 GB Fargate task getting OOM-killed at the
+ *  ~1-hour mark twice in a row on 2026-06-12.  A hard lifetime cap means
+ *  the preview gets stopped cleanly *before* the kernel OOM-killer takes
+ *  opencode down with it.  Driver can press Launch to re-spawn — the
+ *  workspace is preserved, only the dev-server process dies. */
+const MAX_LIFETIME_MS = 2 * 60 * 60 * 1000
+
+/** Memory circuit-breaker — when the container's total RSS exceeds this,
+ *  stop the preview before the kernel OOM-killer fires.  Fargate task is
+ *  sized at 16 GB; opencode itself uses ~500 MB; a healthy ng-serve peaks
+ *  around 4-5 GB.  12 GB leaves ~3-4 GB of headroom — enough that a brief
+ *  spike (e.g. a heavy compile) doesn't trip the breaker, but well short
+ *  of the 16 GB ceiling where the kernel takes the WHOLE task down. */
+const MEMORY_CAP_BYTES = 12 * 1024 * 1024 * 1024
+
+/** How often the sweep runs (idle / lifetime / memory checks). */
 const SWEEP_INTERVAL_MS = 60 * 1000
 
 /** Cap on retained install / run log lines (so memory is bounded across a
@@ -848,12 +867,65 @@ function wireChildStreams(state: ActiveState): void {
   })
 }
 
+/**
+ * Read the container's total RSS in bytes via the cgroups v2 interface
+ * Fargate exposes.  Returns null on platforms where the file isn't present
+ * (macOS dev, older kernels, etc.) — the caller treats null as "skip the
+ * memory check, the other caps still apply".
+ *
+ * cgroups v2 is what every Fargate platform version 1.4+ uses; if AWS
+ * regresses to v1 we'd need /sys/fs/cgroup/memory/memory.usage_in_bytes
+ * instead, but that's not on the roadmap.
+ *
+ * The value is the WHOLE container's RSS — opencode + preview + everything.
+ * That's exactly what we want: the kernel OOM-killer makes the same
+ * accounting; tripping the breaker before the kernel does saves opencode.
+ */
+function readContainerMemoryBytes(): number | null {
+  try {
+    return Number(readFileSync("/sys/fs/cgroup/memory.current", "utf8").trim())
+  } catch {
+    return null
+  }
+}
+
 function startSweepLoop(): void {
   if (sweepTimer) return
   sweepTimer = setInterval(() => {
     if (!active) return
-    if (Date.now() - active.lastTraffic > IDLE_TIMEOUT_MS) {
+    const now = Date.now()
+
+    // 1. Idle cap — no traffic for IDLE_TIMEOUT_MS → assume the dev server
+    //    is unused; stop it to free the slot for another session.
+    if (now - active.lastTraffic > IDLE_TIMEOUT_MS) {
       stopPreview(`idle ${Math.round(IDLE_TIMEOUT_MS / 60_000)}m`)
+      return
+    }
+
+    // 2. Lifetime cap — preview has been alive for MAX_LIFETIME_MS,
+    //    regardless of traffic.  Forces a clean restart before the
+    //    ng-serve / Vite heap leak overflows the task's memory.  Driver
+    //    can immediately Launch again; the workspace is preserved.
+    if (now - active.startedAt > MAX_LIFETIME_MS) {
+      stopPreview(
+        `lifetime cap ${Math.round(MAX_LIFETIME_MS / 60_000)}m exceeded — Driver can re-Launch`,
+      )
+      return
+    }
+
+    // 3. Memory circuit-breaker — stop the preview before the kernel
+    //    OOM-killer takes the whole task (and opencode with it).  Skipped
+    //    silently when /sys/fs/cgroup/memory.current isn't readable
+    //    (non-Linux dev, cgroups v1, etc.) — the lifetime cap still
+    //    applies as a backstop.
+    const used = readContainerMemoryBytes()
+    if (used !== null && used > MEMORY_CAP_BYTES) {
+      const usedMB = Math.round(used / (1024 * 1024))
+      const capMB = Math.round(MEMORY_CAP_BYTES / (1024 * 1024))
+      stopPreview(
+        `memory cap ${capMB}MB exceeded (current ${usedMB}MB) — Driver can re-Launch`,
+      )
+      return
     }
   }, SWEEP_INTERVAL_MS)
   // Don't let the timer keep the event loop alive forever on shutdown.
