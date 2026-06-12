@@ -240,6 +240,52 @@ function isHealthyClone(dest: string): boolean {
 }
 
 /**
+ * Re-install the `prepare-commit-msg` hook for a single (session, repo) pair.
+ * Called by the preview-launcher whenever it detects that something has just
+ * overwritten our hook — most commonly husky's `prepare` script which fires
+ * during `pnpm install` and writes its own scripts into `.git/hooks/`.
+ *
+ * Without this, the sequence:
+ *   1. Boot sweep installs collab hook         → trailers work
+ *   2. Driver launches preview                  → pnpm install runs
+ *   3. husky install (from package.json prepare) overwrites .git/hooks/
+ *   4. Any subsequent commit silently uses husky's hook (no trailers)
+ *
+ * Idempotent: writing the same script over and over is harmless.  Skips
+ * silently when the workspace isn't cloned yet (workspace install is
+ * happening RIGHT NOW; the regular initSessionWorkspace path will lay down
+ * the hook once the clone lands).
+ */
+export async function reinstallCollabHookForRepo(
+  collabSessionId: string,
+  repoFullName: string,
+): Promise<void> {
+  let session: typeof import("./session")
+  try {
+    session = await import("./session")
+  } catch (err) {
+    console.warn(
+      `[collab.workspace] reinstallCollabHookForRepo: session module import failed for ${collabSessionId}:`,
+      err,
+    )
+    return
+  }
+  const cs = session.getCollabSession(collabSessionId)
+  if (!cs) return
+  const dest = repoWorkspacePath(collabSessionId, repoFullName)
+  if (!existsSync(join(dest, ".git", "hooks"))) return
+  try {
+    writeParticipantsFile(dest, cs.participants ?? [])
+    installCollabCommitHook(dest, collabSessionId, cs.name ?? "", repoFullName, cs.branch ?? null)
+  } catch (err) {
+    console.warn(
+      `[collab.workspace] reinstallCollabHookForRepo: install failed for session=${collabSessionId} repo=${repoFullName}:`,
+      err,
+    )
+  }
+}
+
+/**
  * Re-install the `prepare-commit-msg` hook into every active session's repo
  * workspaces.  Runs on container boot, after migrations and before the HTTP
  * server starts listening.
