@@ -137,6 +137,23 @@ export const ServeCommand = effectCmd({
       })
     }
 
+    // Refresh the `prepare-commit-msg` git hook in every active session's
+    // workspaces.  Workspaces live on EFS across deploys, so a hook-logic
+    // change in the image won't reach an existing workspace until someone
+    // manually re-inits it — which is how the 2026-06-12 merge-commit
+    // attribution bug shipped silently for so long.  Fire-and-forget so a
+    // sweep error doesn't block boot.
+    if (isCollabMode) {
+      yield* Effect.promise(async () => {
+        try {
+          const Workspace = await import("../../collab/workspace")
+          void Workspace.reinstallCollabHooksOnBoot()
+        } catch (err) {
+          console.warn("[collab] commit-hook boot sweep skipped:", err)
+        }
+      })
+    }
+
     yield* Effect.never
   }),
 })
