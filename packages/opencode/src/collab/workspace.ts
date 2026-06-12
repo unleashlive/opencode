@@ -240,6 +240,72 @@ function isHealthyClone(dest: string): boolean {
 }
 
 /**
+ * Re-install the `prepare-commit-msg` hook into every active session's repo
+ * workspaces.  Runs on container boot, after migrations and before the HTTP
+ * server starts listening.
+ *
+ * Why this exists: the hook script is baked into the container image at hook-
+ * install time (via `installCollabCommitHook`), but workspaces live on EFS
+ * across deploys.  Without this sweep, an existing workspace cloned before a
+ * hook-logic change keeps its stale hook forever — every future commit in
+ * that session uses the OLD hook.  We observed this on 2026-06-12 when a
+ * merge commit (`3ec8eea10d…`) inside a collab session went out with only
+ * the author and no `Co-authored-by` trailers, because the hook installed
+ * weeks earlier had the merge-source skip in place.
+ *
+ * Scope: only the hook script is refreshed — no git fetch, no participants
+ * write, no checkout.  Sessions whose workspaces aren't yet cloned (waiting
+ * on first init) are skipped silently; they'll get the current hook when
+ * `initSessionWorkspace` runs.
+ *
+ * Idempotent and cheap: ~one file write per (session, repo).  Logs but does
+ * not throw on per-repo failures — a single broken workspace can't take
+ * down the boot sweep for everyone else.
+ */
+export async function reinstallCollabHooksOnBoot(): Promise<void> {
+  let session: typeof import("./session")
+  try {
+    session = await import("./session")
+  } catch (err) {
+    console.warn("[collab.workspace] reinstallCollabHooksOnBoot: session module import failed; skipping:", err)
+    return
+  }
+
+  let sessions: ReturnType<typeof session.listCollabSessions>
+  try {
+    sessions = session.listCollabSessions()
+  } catch (err) {
+    console.warn("[collab.workspace] reinstallCollabHooksOnBoot: listCollabSessions threw; skipping:", err)
+    return
+  }
+
+  let installed = 0
+  let skipped = 0
+  for (const cs of sessions) {
+    for (const repo of cs.repos ?? []) {
+      const dest = repoWorkspacePath(cs.id, repo)
+      if (!existsSync(join(dest, ".git", "hooks"))) {
+        skipped++
+        continue
+      }
+      try {
+        installCollabCommitHook(dest, cs.id, cs.name ?? "", repo, cs.branch ?? null)
+        installed++
+      } catch (err) {
+        console.warn(
+          `[collab.workspace] reinstallCollabHooksOnBoot: install failed for session=${cs.id} repo=${repo}:`,
+          err,
+        )
+      }
+    }
+  }
+
+  console.log(
+    `[collab.workspace] reinstallCollabHooksOnBoot: refreshed ${installed} hook(s), skipped ${skipped} (workspace not yet cloned)`,
+  )
+}
+
+/**
  * Check out the given branch in `repoPath`.  Tries, in order:
  *   1. Already on this branch → no-op.
  *   2. Existing local branch with that name → `git checkout <branch>`.
@@ -440,9 +506,12 @@ COMMIT_MSG_FILE="$1"
 COMMIT_SOURCE="$2"
 
 case "$COMMIT_SOURCE" in
-  ""|"message"|"template")
-    # Only stamp plain commits — leave merges, squashes, and existing
-    # commit messages (via --amend without -m) alone.
+  ""|"message"|"template"|"merge"|"squash")
+    # Stamp plain commits AND merges/squashes.  Skip only "commit" (which is
+    # \`git commit --amend\` without -m — stomping the message would lose
+    # the author's intent).  Merge commits in particular need stamping:
+    # if a Driver runs \`git merge develop\` inside a collab session, the
+    # resulting merge commit should still credit every participant.
     if ! grep -q '^Collaborative-Commit:' "$COMMIT_MSG_FILE"; then
       printf '\\n' >> "$COMMIT_MSG_FILE"
       printf 'Collaborative-Commit: true\\n' >> "$COMMIT_MSG_FILE"
