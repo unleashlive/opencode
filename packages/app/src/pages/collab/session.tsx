@@ -619,7 +619,9 @@ function CollabSessionInner(props: { me: Me }) {
           </div>
         </div>
 
-        {/* Participants */}
+        {/* Participants — inner list caps at ~6 rows and scrolls internally;
+            keeps the section from pushing the chat / queue below off-screen
+            when the session has many invitees. */}
         <div class="px-4 py-3 border-b border-zinc-800/60 flex-shrink-0">
           <div class="flex items-center justify-between mb-2">
             <span class="text-[10px] text-zinc-600 uppercase tracking-wider font-medium">Participants</span>
@@ -627,7 +629,7 @@ function CollabSessionInner(props: { me: Me }) {
               {collab.participants().filter(p => p.isOnline).length}/{collab.participants().length} online
             </span>
           </div>
-          <div class="space-y-1.5">
+          <div class="space-y-1.5 max-h-40 overflow-y-auto overscroll-contain pr-1">
             <For each={collab.participants()}>
               {(p) => (
                 <ParticipantRow
@@ -769,43 +771,48 @@ function CollabSessionInner(props: { me: Me }) {
                 )}
               </For>
             </div>
-            <For each={collab.session()?.repos ?? []}>
-              {(repo) => {
-                // Prefer the live-read current HEAD per repo (works for
-                // legacy sessions too where collab_session.branch is null
-                // because the column didn't exist when they were created).
-                // Fall back to the session-level branch as a secondary
-                // source.
-                const repoBranch = () =>
-                  collab.session()?.repoBranches?.[repo] ?? collab.session()?.branch ?? null
-                return (
-                  <div class="py-1">
-                    <div class="flex items-center gap-1.5">
-                      <svg class="w-3 h-3 text-zinc-600 flex-shrink-0" fill="currentColor" viewBox="0 0 16 16">
-                        <path d="M2 2.5A2.5 2.5 0 014.5 0h8.75a.75.75 0 01.75.75v12.5a.75.75 0 01-.75.75h-2.5a.75.75 0 110-1.5h1.75v-2h-8a1 1 0 00-.714 1.7.75.75 0 01-1.072 1.05A2.495 2.495 0 012 11.5v-9zm10.5-1V9h-8c-.356 0-.694.074-1 .208V2.5a1 1 0 011-1h8z" />
-                      </svg>
-                      <span class="text-xs text-zinc-500 truncate">{repo.split("/")[1] ?? repo}</span>
-                    </div>
-                    <Show when={repoBranch()}>
-                      <div
-                        class="flex items-center gap-1.5 mt-0.5 ml-[18px]"
-                        title={`Current branch in ${repo}: ${repoBranch()}`}
-                      >
-                        <svg class="w-2.5 h-2.5 text-emerald-500/80 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                          <circle cx="6" cy="6" r="2" />
-                          <circle cx="6" cy="18" r="2" />
-                          <circle cx="18" cy="12" r="2" />
-                          <path stroke-linecap="round" d="M6 8v8M6 12c0-3.314 2.686-6 6-6h4" />
+            {/* Repo list caps at ~5 rows and scrolls internally when the
+                session links to many repos — keeps the queue's flex-1
+                space from being squeezed. */}
+            <div class="max-h-40 overflow-y-auto overscroll-contain pr-1">
+              <For each={collab.session()?.repos ?? []}>
+                {(repo) => {
+                  // Prefer the live-read current HEAD per repo (works for
+                  // legacy sessions too where collab_session.branch is null
+                  // because the column didn't exist when they were created).
+                  // Fall back to the session-level branch as a secondary
+                  // source.
+                  const repoBranch = () =>
+                    collab.session()?.repoBranches?.[repo] ?? collab.session()?.branch ?? null
+                  return (
+                    <div class="py-1">
+                      <div class="flex items-center gap-1.5">
+                        <svg class="w-3 h-3 text-zinc-600 flex-shrink-0" fill="currentColor" viewBox="0 0 16 16">
+                          <path d="M2 2.5A2.5 2.5 0 014.5 0h8.75a.75.75 0 01.75.75v12.5a.75.75 0 01-.75.75h-2.5a.75.75 0 110-1.5h1.75v-2h-8a1 1 0 00-.714 1.7.75.75 0 01-1.072 1.05A2.495 2.495 0 012 11.5v-9zm10.5-1V9h-8c-.356 0-.694.074-1 .208V2.5a1 1 0 011-1h8z" />
                         </svg>
-                        <span class="text-[11px] text-emerald-400/90 font-mono truncate">
-                          {repoBranch()}
-                        </span>
+                        <span class="text-xs text-zinc-500 truncate">{repo.split("/")[1] ?? repo}</span>
                       </div>
-                    </Show>
-                  </div>
-                )
-              }}
-            </For>
+                      <Show when={repoBranch()}>
+                        <div
+                          class="flex items-center gap-1.5 mt-0.5 ml-[18px]"
+                          title={`Current branch in ${repo}: ${repoBranch()}`}
+                        >
+                          <svg class="w-2.5 h-2.5 text-emerald-500/80 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <circle cx="6" cy="6" r="2" />
+                            <circle cx="6" cy="18" r="2" />
+                            <circle cx="18" cy="12" r="2" />
+                            <path stroke-linecap="round" d="M6 8v8M6 12c0-3.314 2.686-6 6-6h4" />
+                          </svg>
+                          <span class="text-[11px] text-emerald-400/90 font-mono truncate">
+                            {repoBranch()}
+                          </span>
+                        </div>
+                      </Show>
+                    </div>
+                  )
+                }}
+              </For>
+            </div>
           </div>
         </Show>
       </div>

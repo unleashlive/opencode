@@ -321,7 +321,7 @@ function NotesFeed(props: { notes: CollabNote[]; tick: number }) {
           scroller = el
           queueMicrotask(onAfter)
         }}
-        class="max-h-40 overflow-y-auto space-y-1.5 pr-1"
+        class="max-h-[40vh] overflow-y-auto overscroll-contain space-y-1.5 pr-1"
       >
         <For each={props.notes}>
           {(n) => {
