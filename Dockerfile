@@ -57,8 +57,18 @@ WORKDIR /app
 # install.  We don't actually USE ssh auth (no key shipped); the next layer
 # rewrites every git ssh URL to authenticated HTTPS via a system gitconfig.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git ca-certificates python3 make g++ nodejs npm openssh-client && \
+        git ca-certificates python3 python3-pip make g++ nodejs npm openssh-client && \
     rm -rf /var/lib/apt/lists/*
+
+# Install Headroom (token-compression MCP server, chopratejas/headroom).
+# Available to the iframe LLM as an MCP server registered in opencode.json;
+# usage prompt baked into AGENTS.md so Claude reaches for it on big tool
+# outputs.  --break-system-packages is required on modern Debian (PEP 668);
+# the container is single-purpose, so the "externally-managed-environment"
+# safeguard doesn't apply.  --no-cache-dir keeps the image smaller; the
+# [mcp] extra pulls only the MCP-server entry point (smaller than [all]).
+RUN pip3 install --break-system-packages --no-cache-dir 'headroom-ai[mcp]' && \
+    headroom --version | head -1
 
 # Rewrite ssh-form GitHub URLs to HTTPS at the system level.  Every flavour
 # pnpm / npm / yarn could produce gets normalised to `https://github.com/`:
@@ -147,6 +157,7 @@ RUN mkdir -p /var/opencode/workspaces \
              /home/opencode/.config/opencode \
              /home/opencode/.config/opencode/agent \
              /home/opencode/.cache/opencode/packages \
+             /home/opencode/.cache/headroom \
              /home/opencode/.claude && \
     # Bake a container-wide opencode config:
     #   - `plugin`: pre-installed opencode-claude-auth (cached above at /root)
@@ -163,8 +174,38 @@ RUN mkdir -p /var/opencode/workspaces \
     #     Disabling the provider removes the variant from the dropdown so
     #     users can only pick Anthropic-native models (auth'd via the
     #     opencode-claude-auth plugin).
-    printf '{"plugin":["opencode-claude-auth@latest"],"disabled_providers":["amazon-bedrock"]}\n' \
+    # Top-level opencode config — plugin + disabled providers + the Headroom
+    # MCP server registration.  Schema in
+    # packages/opencode/src/config/mcp.ts; `type: local` means opencode
+    # spawns the command itself and speaks MCP over stdio.  Timeout is
+    # generous (10 s) because Headroom's first run lazy-loads its compressor
+    # models; subsequent calls are sub-second.
+    printf '{"plugin":["opencode-claude-auth@latest"],"disabled_providers":["amazon-bedrock"],"mcp":{"headroom":{"type":"local","command":["headroom","mcp"],"enabled":true,"timeout":10000}}}\n' \
       > /home/opencode/.config/opencode/opencode.json && \
+    # Global AGENTS.md — opencode auto-loads $XDG_CONFIG_HOME/opencode/AGENTS.md
+    # (= /home/opencode/.config/opencode/AGENTS.md here) into the system
+    # prompt of EVERY session, regardless of project cwd
+    # (packages/opencode/src/session/instruction.ts:64).  Use it to introduce
+    # Headroom MCP so the LLM knows when to compress.  We keep the nudge
+    # short and behaviour-focused — operator-facing context belongs in per-
+    # repo AGENTS.md instead.
+    printf '%s\n' \
+      '# Collab session context' \
+      '' \
+      '## Headroom MCP (token compression)' \
+      '' \
+      'Three MCP tools are available in this session for compressing large content before it consumes the context budget:' \
+      '' \
+      '- `headroom_compress(content)` — returns an `<hr:...>` token and caches the original locally.  Pass the token onward instead of the full content; downstream tools can still call `headroom_retrieve` on it when they need the bytes.' \
+      '- `headroom_retrieve(token)` — fetches the original content for a previously-compressed token.' \
+      '- `headroom_stats()` — current cache size + cumulative token-savings summary.' \
+      '' \
+      '### When to reach for it' \
+      '' \
+      'Use `headroom_compress` whenever a tool result is likely above ~2,000 tokens — long log dumps, large file reads, RAG chunks, sprawling CloudWatch tails.  Originals stay reversible (no information loss); typical compression is 60–95%.  Skipping it on big outputs leaves obvious tokens on the table.' \
+      '' \
+      'Skip compression on short results (< ~1,000 tokens) — the overhead outweighs the savings.' \
+      > /home/opencode/.config/opencode/AGENTS.md && \
     # Bake the "fast" agent into the container so it shows up in the iframe's
     # per-session agent picker.  Haiku-powered, minimal ceremony.  Users in
     # /collab/new (or inside an existing session) can pick "fast" from the
