@@ -368,7 +368,9 @@ export default function NewCollabSession() {
             <ClaudeCredentialsBanner />
 
             <form onSubmit={handleSubmit} class="space-y-6">
-              {/* Session name */}
+              {/* Session name — required field; once filled it gets a
+                  subtle emerald border to match the "validated / satisfied"
+                  semantic emerald carries elsewhere in the collab SPA. */}
               <div>
                 <label class="block text-sm font-medium text-zinc-300 mb-1.5">Session name</label>
                 <input
@@ -376,7 +378,11 @@ export default function NewCollabSession() {
                   value={name()}
                   onInput={(e) => setName(e.currentTarget.value)}
                   placeholder="e.g. Auth refactor sprint"
-                  class="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blue-500"
+                  class={`w-full bg-zinc-900 border rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none transition-colors ${
+                    name().trim()
+                      ? "border-emerald-600/50 focus:border-emerald-500"
+                      : "border-zinc-700 focus:border-blue-500"
+                  }`}
                   required
                 />
               </div>
@@ -394,7 +400,16 @@ export default function NewCollabSession() {
                   <div class="text-xs text-zinc-600 py-2">No repositories found in org</div>
                 </Show>
                 <Show when={(repos()?.length ?? 0) > 0}>
-                  <div class="space-y-1 max-h-48 overflow-y-auto rounded-lg border border-zinc-800">
+                  {/* Container border subtly emerald once ≥1 repo is
+                      selected — gives a quiet visual confirmation without
+                      adding noise. */}
+                  <div
+                    class={`space-y-1 max-h-48 overflow-y-auto rounded-lg border transition-colors ${
+                      selectedRepos().length > 0
+                        ? "border-emerald-600/40"
+                        : "border-zinc-800"
+                    }`}
+                  >
                     <For each={repos()}>
                       {(repo) => (
                         <label class="flex items-center gap-3 px-3 py-2 hover:bg-zinc-800/50 cursor-pointer">
@@ -503,10 +518,17 @@ export default function NewCollabSession() {
                 </div>
               </Show>
 
+              {/* High-emphasis CTA — elevated with shadow + ring so it reads
+                  as the primary action on the page even after the form fills
+                  out.  Keep the blue family (don't swap to emerald — emerald
+                  carries "approve / live preview" semantics elsewhere in the
+                  collab SPA, e.g. PreviewLauncher's running pill); the
+                  "secondary opencode accent" treatment here is richer blue +
+                  elevation, not a hue swap. */}
               <button
                 type="submit"
                 disabled={submitting() || !name().trim()}
-                class="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-medium py-2.5 rounded-lg text-sm transition-colors"
+                class="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-500 disabled:shadow-none disabled:ring-0 text-white font-semibold py-3 rounded-lg text-sm transition-all shadow-lg shadow-blue-600/30 hover:shadow-xl hover:shadow-blue-500/40 ring-1 ring-blue-500/40 hover:ring-blue-400/60 focus:outline-none focus:ring-2 focus:ring-blue-400/80"
               >
                 {submitting() ? "Creating…" : "Create Collab Session"}
               </button>
