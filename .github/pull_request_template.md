@@ -25,5 +25,6 @@ _If this is a UI change, please include a screenshot or recording._
 
 - [ ] I have tested my changes locally
 - [ ] I have not included unrelated changes in this PR
+- [ ] **(`packages/opencode/src/collab/**`, `Dockerfile`, `.github/workflows/deploy-collab.yml` only)** `/code-review` skill run on the diff — see [DEPLOYMENT.md → "Before merging an opencode-collab PR"](../DEPLOYMENT.md#before-merging-an-opencode-collab-pr)
 
 _If you do not follow this template your PR will be automatically rejected._
