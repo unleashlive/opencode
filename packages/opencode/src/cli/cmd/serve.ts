@@ -154,6 +154,35 @@ export const ServeCommand = effectCmd({
       })
     }
 
+    // S6 — start the container-RSS monitor.  Pure telemetry: logs a WARNING
+    // when total memory crosses 13 GB (leading indicator for the 16 GB task
+    // ceiling) so an operator can correlate it with a later OOM.  Never kills
+    // anything.  Self-disables on platforms without the cgroup file.
+    if (isCollabMode) {
+      yield* Effect.promise(async () => {
+        try {
+          const { startMemoryMonitor } = await import("../../collab/cgroup-memory")
+          startMemoryMonitor()
+        } catch (err) {
+          console.warn("[collab] memory monitor skipped:", err)
+        }
+      })
+    }
+
+    // S7 — sweep orphan workspace directories on EFS (dirs with no live
+    // session row, older than the 24 h safety floor).  Reclaims space left
+    // by failed cleanups / drift.  Fire-and-forget; per-dir failures log.
+    if (isCollabMode) {
+      yield* Effect.promise(async () => {
+        try {
+          const Workspace = await import("../../collab/workspace")
+          void Workspace.cleanupOrphanWorkspaces()
+        } catch (err) {
+          console.warn("[collab] orphan-workspace sweep skipped:", err)
+        }
+      })
+    }
+
     yield* Effect.never
   }),
 })

@@ -10,7 +10,7 @@
  */
 
 import { spawn } from "child_process"
-import { mkdirSync, rmSync, existsSync, writeFileSync, renameSync } from "fs"
+import { mkdirSync, rmSync, existsSync, writeFileSync, renameSync, readdirSync, statSync } from "fs"
 import { join } from "path"
 import type { Participant } from "@opencode-ai/collab"
 
@@ -605,6 +605,72 @@ export function cleanupSessionWorkspace(collabSessionId: string): void {
   const root = sessionWorkspacePath(collabSessionId)
   if (existsSync(root)) {
     rmSync(root, { recursive: true, force: true })
+  }
+}
+
+/**
+ * Orphan-workspace sweep (S7).  Runs once on container boot.
+ *
+ * Explicit session deletion already wipes the workspace synchronously
+ * (router.ts DELETE → cleanupSessionWorkspace), so the steady state has no
+ * orphans.  But drift accumulates: an rmSync that threw on an EFS hiccup, a
+ * task killed between soft-delete and cleanup, a manual DB edit.  Each
+ * frontend-sized orphan is ~1.5 GB on EFS, so left unchecked this grows the
+ * filesystem (and the bill) indefinitely.
+ *
+ * This sweep lists the workspace-root subdirectories (each named by a
+ * collabSessionId) and removes any that have NO corresponding live
+ * (non-soft-deleted) session row AND whose directory mtime is older than the
+ * safety floor.  The mtime floor is belt-and-suspenders: a session inserts
+ * its DB row BEFORE cloning, so a live dir always has a live row — but the
+ * floor guarantees we never touch anything that was written in the last
+ * 24 h, eliminating any boot-time TOCTOU against an in-progress init.
+ *
+ * Best-effort: per-dir failures log and continue.  Never throws.
+ */
+const ORPHAN_WORKSPACE_MIN_AGE_MS = 24 * 60 * 60 * 1000
+
+export async function cleanupOrphanWorkspaces(): Promise<void> {
+  const root = workspaceRoot()
+  if (!existsSync(root)) return
+
+  let liveIds: Set<string>
+  try {
+    const session = await import("./session")
+    // listCollabSessions() already excludes soft-deleted rows — exactly the
+    // "live" set we want to protect.
+    liveIds = new Set(session.listCollabSessions().map((s) => s.id))
+  } catch (err) {
+    console.warn("[collab.workspace] cleanupOrphanWorkspaces: session list failed; skipping:", err)
+    return
+  }
+
+  let entries: string[]
+  try {
+    entries = readdirSync(root)
+  } catch (err) {
+    console.warn("[collab.workspace] cleanupOrphanWorkspaces: readdir failed; skipping:", err)
+    return
+  }
+
+  const now = Date.now()
+  let removed = 0
+  for (const name of entries) {
+    if (liveIds.has(name)) continue // live session — leave it
+    const dir = join(root, name)
+    try {
+      const st = statSync(dir)
+      if (!st.isDirectory()) continue
+      if (now - st.mtimeMs < ORPHAN_WORKSPACE_MIN_AGE_MS) continue // too fresh — protect against init races
+      rmSync(dir, { recursive: true, force: true })
+      removed++
+      console.log(`[collab.workspace] cleanupOrphanWorkspaces: removed orphan workspace ${name}`)
+    } catch (err) {
+      console.warn(`[collab.workspace] cleanupOrphanWorkspaces: failed to remove ${name}:`, err)
+    }
+  }
+  if (removed > 0) {
+    console.log(`[collab.workspace] cleanupOrphanWorkspaces: reclaimed ${removed} orphan workspace dir(s)`)
   }
 }
 

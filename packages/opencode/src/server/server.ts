@@ -23,6 +23,23 @@ import { lazy } from "@/util/lazy"
 // Close enough for an ALB health probe; not used for SLA reporting.
 const serverStartedAt = Date.now()
 
+// ── Event-loop liveness heartbeat (S5) ──────────────────────────────────────
+// A 5-s interval stamps `lastEventLoopTick`.  /healthz compares it against
+// now: if the loop has been blocked long enough that the tick is >30 s stale,
+// the server is wedged (a long synchronous operation, a tight loop in a
+// plugin, a giant JSON.parse on a runaway preview log) even though the HTTP
+// listener might still technically accept the connection.  Returning 503 in
+// that window lets the ALB pull the task ~1 min sooner than waiting for the
+// request to time out.  Unref'd so it never holds the loop open on shutdown.
+let lastEventLoopTick = Date.now()
+const EVENT_LOOP_STALL_THRESHOLD_MS = 30_000
+{
+  const tick = setInterval(() => {
+    lastEventLoopTick = Date.now()
+  }, 5_000)
+  if (typeof tick.unref === "function") tick.unref()
+}
+
 // ── Collab middleware ──────────────────────────────────────────────────────────
 // Intercepts /collab/* requests before the Effect HTTP router's catch-all UI
 // route can serve index.html for them. Bridges the standard Web Request/Response
@@ -127,13 +144,21 @@ const serveHealthz = () =>
   Effect.sync(() => {
     const dbOk = pingDatabase()
     const githubStatus = cachedGitHubStatus()
-    // db is the only check that can flip overall ok; github + native_api are
-    // informational so a degraded external dep doesn't pull the ALB out from
-    // under us (we'd be DoS-ing ourselves if GitHub's HEAD ever 5xx'd).
+    // S5 — event-loop liveness.  Stale tick = the loop was blocked long
+    // enough to miss several 5-s heartbeats, i.e. the server is wedged.
+    const eventLoopLagMs = Date.now() - lastEventLoopTick
+    const eventLoopOk = eventLoopLagMs <= EVENT_LOOP_STALL_THRESHOLD_MS
+    // db + event-loop are the checks that can flip overall ok; github +
+    // native_api are informational so a degraded external dep doesn't pull
+    // the ALB out from under us (we'd be DoS-ing ourselves if GitHub's HEAD
+    // ever 5xx'd).
+    const ok = dbOk && eventLoopOk
     const body = {
-      ok: dbOk,
+      ok,
       checks: {
         db: dbOk ? "ok" : "fail",
+        event_loop: eventLoopOk ? "ok" : "stalled",
+        event_loop_lag_ms: eventLoopLagMs,
         github: githubStatus,
         // native_api is the server itself; if Bun is up enough to answer /healthz
         // then the native API is up too — we just record it for the dashboard.
@@ -142,8 +167,11 @@ const serveHealthz = () =>
       version: process.env["OPENCODE_VERSION"] ?? "unknown",
       uptime_s: Math.floor((Date.now() - serverStartedAt) / 1000),
     }
+    if (!eventLoopOk) {
+      log.error("/healthz event-loop stall detected", { lagMs: eventLoopLagMs })
+    }
     return HttpServerResponse.jsonUnsafe(body, {
-      status: dbOk ? 200 : 503,
+      status: ok ? 200 : 503,
       headers: { "cache-control": "no-store" },
     })
   })
