@@ -96,6 +96,21 @@ const collabMiddleware: HttpMiddleware.HttpMiddleware = (app) =>
       })
     }
 
+    // V4 — long-lived immutable cache headers on content-hashed static
+    // assets.  Vite emits assets under /assets/ and as <name>-<hash>.<ext>;
+    // the hash changes whenever the content does, so caching them for a year
+    // is safe and cuts repeat-visit + SPA-reload load.  index.html (no hash)
+    // is deliberately excluded so a deploy's new asset manifest is always
+    // picked up.  We let the upstream UI route produce the response, then
+    // stamp the header on success only (don't cache a 404).
+    if (req.method === "GET" && isHashedStaticAsset(pathname)) {
+      const res = yield* app
+      if (res.status >= 200 && res.status < 300) {
+        return HttpServerResponse.setHeader(res, "cache-control", "public, max-age=31536000, immutable")
+      }
+      return res
+    }
+
     // Only intercept collab API/auth/invite paths — let UI routes fall through to index.html
     const isCollabApi =
       pathname === "/collab/auth/github" ||
@@ -147,6 +162,18 @@ const serveHealthz = () =>
       headers: { "cache-control": "no-store" },
     })
   })
+
+// V4 — identify a content-hashed static asset (immutable-cacheable).
+//   - anything under /assets/  (Vite's default hashed-asset directory), OR
+//   - a top-level file with a `-<hash>` segment before a known static
+//     extension, e.g. /index-DTT-8kNv.js, /chunk-AB12cd34.css
+// index.html and other un-hashed paths return false → not long-cached, so a
+// deploy's fresh asset manifest is always fetched.
+const HASHED_ASSET_RE = /-[A-Za-z0-9_-]{8,}\.(?:js|css|woff2?|ttf|otf|png|jpe?g|svg|webp|avif|gif|ico|wasm|map)$/i
+function isHashedStaticAsset(pathname: string): boolean {
+  if (pathname.startsWith("/assets/")) return true
+  return HASHED_ASSET_RE.test(pathname)
+}
 
 function pingDatabase(): boolean {
   try {
