@@ -19,6 +19,8 @@ const SQL = `
     init_error TEXT,
     preview_intent TEXT,
     preview_intent_at INTEGER,
+    preview_crash_count INTEGER NOT NULL DEFAULT 0,
+    preview_crash_at INTEGER,
     created_at INTEGER NOT NULL,
     deleted_at INTEGER
   );
@@ -156,6 +158,17 @@ export function runCollabMigrations() {
     }
     if (!cols.some((c) => c.name === "preview_intent_at")) {
       db.$client.exec("ALTER TABLE collab_session ADD COLUMN preview_intent_at INTEGER")
+    }
+
+    // preview_crash_count / preview_crash_at — the auto-resume crash-loop
+    // breaker (S2).  Legacy rows backfill to 0 (no crashes recorded), which
+    // is exactly the "eligible for resume" state, so no special handling
+    // needed.  See resumePreviewsOnBoot's breaker check in preview-launcher.ts.
+    if (!cols.some((c) => c.name === "preview_crash_count")) {
+      db.$client.exec("ALTER TABLE collab_session ADD COLUMN preview_crash_count INTEGER NOT NULL DEFAULT 0")
+    }
+    if (!cols.some((c) => c.name === "preview_crash_at")) {
+      db.$client.exec("ALTER TABLE collab_session ADD COLUMN preview_crash_at INTEGER")
     }
 
     // Boot sweep: revert mid-flight LLM dispatches back to `approved` so the

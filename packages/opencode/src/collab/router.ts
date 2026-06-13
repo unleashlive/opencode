@@ -1464,6 +1464,12 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
     // GIT_ASKPASS helper for the consumption side, and preview-launcher's
     // ActiveState._gitAccessToken comment for the in-memory caching
     // semantics across restart.
+    // A manual Driver launch is an explicit human retry — clear any
+    // crash-loop breaker state (S2) BEFORE launching so a session that the
+    // breaker previously locked out of auto-resume becomes eligible again,
+    // and so this attempt starts from a clean counter.  If the workspace is
+    // still broken it'll re-accumulate crashes and the breaker re-engages.
+    Session.clearPreviewCrashCount(sessionId)
     const result = Preview.launchPreview(sessionId, repoFullName, sess.githubAccessToken)
     if (!result.ok) return json({ error: result.error, ...("existing" in result ? { existing: result.existing } : {}) }, result.status)
     // Persist the Driver's intent so an ECS task replacement re-spawns the

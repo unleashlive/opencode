@@ -34,6 +34,18 @@ export const CollabSessionTable = sqliteTable("collab_session", {
    *  shutdown (rare — single-launcher constraint usually prevents this), the
    *  more recently active one wins re-spawn priority on boot. */
   preview_intent_at: integer({ mode: "timestamp_ms" }),
+  /**
+   * Consecutive preview-install crash count + timestamp of the last crash.
+   * Incremented when a resumed-or-launched preview's child process exits
+   * non-zero while still in the `installing` phase.  `resumePreviewsOnBoot()`
+   * refuses to auto-resume a session whose count has reached the breaker
+   * threshold within the recent window — stops a broken workspace from
+   * OOM-looping the task across boots.  A successful "ready" transition
+   * resets the count to 0.  A Driver pressing Launch manually also clears it
+   * (explicit human retry overrides the breaker).
+   */
+  preview_crash_count: integer().notNull().default(0),
+  preview_crash_at: integer({ mode: "timestamp_ms" }),
   created_at: integer({ mode: "timestamp_ms" }).notNull(),
   deleted_at: integer({ mode: "timestamp_ms" }),
 })
