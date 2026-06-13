@@ -80,6 +80,20 @@ jobs:
             ${{ steps.img.outputs.sha_image }}
           cache-from: type=gha,scope=opencode-collab
           cache-to: type=gha,scope=opencode-collab,mode=max
+          # Build secret for the pnpm store pre-warm (Dockerfile "warm-store"
+          # step, speed win V1).  Needs READ access to unleashlive/frontend +
+          # unleashlive/api so the shallow clones + `pnpm fetch` populate the
+          # store baked into the image.  Provision a fine-grained PAT (or a
+          # GitHub App installation token) with Contents:read on those two
+          # repos and store it as the repo secret WARM_STORE_GITHUB_TOKEN.
+          #
+          # OPTIONAL: when the secret is unset, build-push-action passes an
+          # empty value, the Dockerfile's `[ ! -s ]` guard skips the warm, and
+          # the image still builds — runtime installs just stay cold (~10 min)
+          # until a warmed image ships.  So this is safe to merge before the
+          # secret exists.
+          secrets: |
+            github_token=${{ secrets.WARM_STORE_GITHUB_TOKEN }}
 
       - name: Register new task definition revision
         id: register

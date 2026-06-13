@@ -210,6 +210,65 @@ RUN mkdir -p /var/opencode/workspaces \
     # Carry the pre-installed plugin tree across from /root.
     cp -r /root/.cache/opencode/packages/. /home/opencode/.cache/opencode/packages/ 2>/dev/null || true
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Pre-warm the pnpm content-addressed store with unleashlive/frontend +
+# unleashlive/api dependencies (speed win V1).
+#
+# The frontend's pnpm tree is ~3,500 packages; a COLD `pnpm install` inside a
+# fresh collab workspace takes ~10 min (network + download).  pnpm's store is
+# content-addressed and shared across installs, so if we populate it at BUILD
+# time, every runtime session install becomes a near-offline store-link op
+# ("Done in ~30 s") instead of a 10-min download.
+#
+# `pnpm fetch` is the right tool: it reads ONLY the lockfile (ignores
+# package.json), downloads every locked dependency into the store, and does
+# NOT link a node_modules tree — exactly a store warm.  We run it with
+# HOME=/home/opencode so pnpm's default store path resolves to
+# /home/opencode/.local/share/pnpm/store — the SAME path the runtime preview
+# install (uid 10001, HOME=/home/opencode) reads by default.  The final-stage
+# `chown -R 10001:10001 /home/opencode` hands the warmed store to the runtime
+# user.
+#
+# Auth: cloning these PRIVATE repos at build time needs a cross-repo read
+# token, provided as a BuildKit secret (id=github_token).  The token is
+# mounted at /run/secrets/github_token for this RUN only — it never lands in
+# a layer or the image.  When the secret is absent (local builds, or before
+# the deploy workflow is wired to pass it), the step logs and SKIPS cleanly —
+# the image still builds; runtime installs just pay the cold ~10 min until a
+# warmed image ships.  See DEPLOYMENT.md for wiring the secret in CI.
+#
+# Staleness is fine: a lockfile that drifts after build means pnpm fetches
+# only the DELTA at runtime (new/changed packages); the unchanged thousands
+# are store hits.  Even a week-stale warm removes the bulk of the cold cost.
+RUN --mount=type=secret,id=github_token,required=false \
+    TOKEN_FILE=/run/secrets/github_token; \
+    if [ ! -s "$TOKEN_FILE" ]; then \
+      echo "[warm-store] no github_token secret — SKIPPING pnpm store pre-warm (runtime installs will be cold)"; \
+    else \
+      TOKEN="$(cat "$TOKEN_FILE")"; \
+      for repo in unleashlive/frontend unleashlive/api; do \
+        name="$(basename "$repo")"; \
+        echo "[warm-store] cloning $repo (shallow) for lockfile…"; \
+        if git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${repo}.git" "/tmp/warm-$name" >/tmp/clone.log 2>&1; then \
+          if [ -f "/tmp/warm-$name/pnpm-lock.yaml" ]; then \
+            echo "[warm-store] pnpm fetch for $name…"; \
+            if ( cd "/tmp/warm-$name" && HOME=/home/opencode pnpm fetch >/tmp/fetch.log 2>&1 ); then \
+              tail -3 /tmp/fetch.log; \
+            else \
+              echo "[warm-store] WARNING pnpm fetch failed for $name (continuing):"; tail -5 /tmp/fetch.log || true; \
+            fi; \
+          else \
+            echo "[warm-store] $name has no pnpm-lock.yaml — skipping"; \
+          fi; \
+          rm -rf "/tmp/warm-$name"; \
+        else \
+          echo "[warm-store] WARNING clone failed for $repo (continuing):"; tail -3 /tmp/clone.log || true; \
+        fi; \
+      done; \
+      rm -f /tmp/clone.log /tmp/fetch.log; \
+      echo "[warm-store] pnpm store pre-warm complete"; \
+    fi
+
 # Bring in ONLY manifests, then install workspace deps.
 # Cache mount on /root/.bun/install/cache keeps the bun package store between builds.
 COPY --from=manifests /m/ ./
