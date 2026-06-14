@@ -31,6 +31,19 @@ import { getActiveUpstreamScheme, getActivePreviewPort, getActiveServePath } fro
 const PREVIEW_PREFIX = "/preview/"
 
 /**
+ * Max request body the preview proxy will forward to the in-container dev
+ * server (S3).  The proxy runs inside the single-replica opencode process;
+ * a multi-GB upload buffered through it before the upstream's own 413 would
+ * swing the whole task into memory pressure.  50 MB is generous for any
+ * legitimate dev-server interaction (real frontend file uploads go straight
+ * to S3, not through the dev server).  Requests declaring more are rejected
+ * at the proxy edge with a 413; requests that omit Content-Length and stream
+ * past the cap are caught by the same ceiling on the upstream side — this
+ * guard handles the common declared-length case cheaply.
+ */
+const MAX_PREVIEW_BODY_BYTES = 50 * 1024 * 1024
+
+/**
  * Parse a `/preview/...` URL.  Two shapes accepted:
  *
  *   1. /preview/<port>/<rest>     — explicit port (legacy / multi-preview-future)
@@ -155,6 +168,24 @@ export async function handlePreviewHttp(req: Request, port: number, rest: string
   // swept at 30 min — quiet during normal browsing, just verbose enough
   // during a debugging session to be useful.
   console.log(`[collab.preview-proxy] ${req.method} ${rest} → ${target}`)
+
+  // S3 — reject oversize request bodies at the proxy edge.  A declared
+  // Content-Length above the cap is bounced with 413 before we open the
+  // upstream connection, so a buggy/malicious large upload can't buffer
+  // through opencode's heap on the single-replica task.
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    const declaredLen = Number(req.headers.get("content-length") ?? "0")
+    if (Number.isFinite(declaredLen) && declaredLen > MAX_PREVIEW_BODY_BYTES) {
+      const capMB = Math.round(MAX_PREVIEW_BODY_BYTES / (1024 * 1024))
+      console.warn(
+        `[collab.preview-proxy] ${req.method} ${rest} rejected: body ${declaredLen}B exceeds ${capMB}MB cap`,
+      )
+      return new Response(
+        `Request body too large. The preview proxy caps uploads at ${capMB} MB.`,
+        { status: 413, headers: { "content-type": "text/plain; charset=utf-8" } },
+      )
+    }
+  }
 
   // Strip hop-by-hop headers + the Host header (we set it ourselves below
   // so the dev server sees its expected hostname; the browser's original

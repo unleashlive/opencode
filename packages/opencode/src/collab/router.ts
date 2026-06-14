@@ -621,6 +621,21 @@ function parseCookies(header: string): Record<string, string> {
 
 // ── SSE connection store ────────────────────────────────────────────────────────
 
+/** S4 — bound concurrent SSE streams per session.  Realistic max is 2-3
+ *  users × 2-3 tabs; 8 leaves comfortable headroom while capping the
+ *  file-descriptor + per-stream-closure footprint a runaway client (many
+ *  tabs, or a reconnect storm) could otherwise pile onto the single-replica
+ *  task.  The 9th concurrent connection for a session gets a 429. */
+const MAX_SSE_PER_SESSION = 8
+
+/** S4 — recycle an SSE stream that has gone this long without a single real
+ *  event (keepalives don't count).  A quiet session's tab is closed from the
+ *  server side; the SPA's EventSource auto-reconnects within ~1 s and
+ *  immediately receives the connect-time state snapshot, so this is a no-op
+ *  UX-wise but caps the lifetime of any one connection — abandoned-but-open
+ *  background tabs can't hold a stream (and its heartbeat timer) for days. */
+const SSE_IDLE_DISCONNECT_MS = 2 * 60 * 60 * 1000
+
 const sseClients = new Map<string, Set<(e: CollabEvent) => void>>()
 
 function registerSse(collabSessionId: string, send: (e: CollabEvent) => void): () => void {
@@ -1812,6 +1827,24 @@ function handleSse(
   collabSessionId: string,
   sess: { githubId: number; githubLogin: string },
 ): Response {
+  // S4 — refuse a new stream once this session already has the max
+  // concurrent connections.  The SPA surfaces the 429 as a "too many open
+  // tabs" hint; closing another tab frees a slot.  Counting the registered
+  // set is sufficient — a brief under-count during the connect window (the
+  // send callback registers inside stream.start(), a tick later) can only
+  // let through a connection or two beyond the cap under a true thundering
+  // herd, which is harmless.
+  const existing = sseClients.get(collabSessionId)?.size ?? 0
+  if (existing >= MAX_SSE_PER_SESSION) {
+    console.warn(
+      `[collab] SSE connection cap hit for session=${collabSessionId} (${existing}/${MAX_SSE_PER_SESSION}) — rejecting`,
+    )
+    return new Response(
+      `Too many open connections for this session (max ${MAX_SSE_PER_SESSION}). Close another tab and retry.`,
+      { status: 429, headers: { "content-type": "text/plain; charset=utf-8", "retry-after": "5" } },
+    )
+  }
+
   // We need to defer events until the ReadableStream's controller exists.
   // The bug we're fixing: previously, setOnline + the collab:participant_joined
   // broadcast ran here at the top of handleSse, which meant the new client's
@@ -1828,8 +1861,14 @@ function handleSse(
   let unregister: (() => void) | null = null
   const encoder = new TextEncoder()
   const pending: CollabEvent[] = []
+  // S4 — timestamp of the most-recent REAL event delivered to this client.
+  // Keepalive comment lines don't update it; the idle-recycle check in the
+  // heartbeat compares against it.  Seeded to "now" so a freshly-opened
+  // stream is never immediately considered idle.
+  let lastRealEventAt = Date.now()
 
   const send = (event: CollabEvent) => {
+    lastRealEventAt = Date.now()
     if (!controllerRef) {
       pending.push(event)
       return
@@ -1870,6 +1909,21 @@ function handleSse(
   // reconnect gap go to zero listeners and the SPA's iframe gate stays
   // stuck in "pending" forever.
   let heartbeat: ReturnType<typeof setInterval> | null = null
+
+  // Single teardown path shared by client-initiated cancel() AND the
+  // server-initiated idle recycle, guarded so neither double-runs.
+  let tornDown = false
+  const teardown = () => {
+    if (tornDown) return
+    tornDown = true
+    if (heartbeat) clearInterval(heartbeat)
+    unregister?.()
+    Participant.setOnline(collabSessionId, sess.githubId, false)
+    // Clear any lingering "is typing…" indicator from this user — if they
+    // disconnect while typing, others would otherwise see the dot forever.
+    broadcastSse(collabSessionId, { type: "collab:typing_stop", githubLogin: sess.githubLogin })
+    broadcastSse(collabSessionId, { type: "collab:participant_left", githubLogin: sess.githubLogin })
+  }
 
   const stream = new ReadableStream({
     start(controller) {
@@ -1929,6 +1983,25 @@ function handleSse(
 
       heartbeat = setInterval(() => {
         if (!controllerRef) return
+        // S4 idle recycle — if no real event has been delivered for the
+        // idle window, close this stream from the server side.  The SPA
+        // auto-reconnects and re-syncs via the connect-time snapshot, so a
+        // genuinely-active session is never interrupted (its events keep
+        // lastRealEventAt fresh); only quiet/abandoned tabs get recycled,
+        // capping how long any one connection can persist.
+        if (Date.now() - lastRealEventAt > SSE_IDLE_DISCONNECT_MS) {
+          console.log(
+            `[collab] SSE idle recycle for session=${collabSessionId} user=${sess.githubLogin} ` +
+              `(no events for ${Math.round(SSE_IDLE_DISCONNECT_MS / 60_000)}m)`,
+          )
+          teardown()
+          try {
+            controllerRef.close()
+          } catch {
+            // Already closed — fine.
+          }
+          return
+        }
         try {
           controllerRef.enqueue(encoder.encode(`: keepalive\n\n`))
         } catch {
@@ -1938,13 +2011,7 @@ function handleSse(
       }, 20_000)
     },
     cancel() {
-      if (heartbeat) clearInterval(heartbeat)
-      unregister?.()
-      Participant.setOnline(collabSessionId, sess.githubId, false)
-      // Clear any lingering "is typing…" indicator from this user — if they
-      // disconnect while typing, others would otherwise see the dot forever.
-      broadcastSse(collabSessionId, { type: "collab:typing_stop", githubLogin: sess.githubLogin })
-      broadcastSse(collabSessionId, { type: "collab:participant_left", githubLogin: sess.githubLogin })
+      teardown()
     },
   })
 
