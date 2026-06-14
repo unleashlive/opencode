@@ -560,6 +560,10 @@ export function launchPreview(
     _log: [],
     recentLog: [],
     errorMessage: undefined,
+    // Snapshot URL (server-computed).  Required on PreviewStateSnapshot, so
+    // ActiveState (which extends it) must carry it too; getPreviewState()
+    // re-derives the same stable, env-based value when it builds a snapshot.
+    url: previewUrl(),
     child,
     config,
     _stopRequested: false,
