@@ -698,6 +698,7 @@ export function restartPreview(): LaunchResult {
     startedAt: Date.now(),
     lastTraffic: Date.now(),
     recentLog: [],
+    url: previewUrl(),
   }
 
   stopPreview("restart")
