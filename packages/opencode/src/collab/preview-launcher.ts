@@ -34,7 +34,7 @@
  */
 
 import { spawn, type ChildProcess } from "child_process"
-import { existsSync, readFileSync } from "fs"
+import { existsSync, readFileSync, statSync, readdirSync } from "fs"
 import { join } from "path"
 import { repoWorkspacePath } from "./workspace"
 import type { CollabEvent } from "@opencode-ai/collab"
@@ -73,7 +73,23 @@ const MAX_LIFETIME_MS = 2 * 60 * 60 * 1000
  *  of the 16 GB ceiling where the kernel takes the WHOLE task down. */
 const MEMORY_CAP_BYTES = 12 * 1024 * 1024 * 1024
 
-/** How often the sweep runs (idle / lifetime / memory checks). */
+/** Install-hang watchdog (S1) — if a preview is still in the `installing`
+ *  phase and has produced no stdout/stderr for this long, presume the
+ *  install is wedged and stop it.  pnpm emits progress lines constantly
+ *  during a healthy install, so 5 min of total silence is a strong wedge
+ *  signal (dead registry, stuck native build, OOMing dep).  Distinct from
+ *  IDLE_TIMEOUT_MS, which only counts request traffic and so never fires
+ *  during install. */
+const INSTALL_SILENCE_TIMEOUT_MS = 5 * 60 * 1000
+
+/** Crash-loop breaker (S2) — refuse to auto-resume a session on boot once it
+ *  has crashed during install this many times within BREAKER_WINDOW_MS.  A
+ *  Driver pressing Launch manually overrides the breaker (and resets the
+ *  count); a successful "ready" transition also resets it. */
+const BREAKER_CRASH_THRESHOLD = 3
+const BREAKER_WINDOW_MS = 60 * 60 * 1000
+
+/** How often the sweep runs (idle / lifetime / memory / install-hang checks). */
 const SWEEP_INTERVAL_MS = 60 * 1000
 
 /** Cap on retained install / run log lines (so memory is bounded across a
@@ -167,6 +183,14 @@ interface ActiveState extends PreviewStateSnapshot {
   config: PreviewConfig
   // Mutable accumulators (not snapshot-able directly)
   _log: Array<{ stream: "stdout" | "stderr"; line: string; ts: number }>
+  /** Epoch-ms of the most-recent stdout/stderr line from the child.  The
+   *  install-hang watchdog (S1) reads this every sweep: if the preview is
+   *  still in the `installing` phase and has emitted nothing for
+   *  INSTALL_SILENCE_TIMEOUT_MS, the install is presumed wedged (dead
+   *  registry, stuck native build, OOMing dep) and gets stopped so memory
+   *  is freed and the Driver can retry — instead of sitting until the
+   *  30-minute idle cap, which only counts request traffic, not output. */
+  _lastOutput: number
   /** True iff stopPreview was called for THIS state (vs the process exiting
    *  on its own).  Lets the exit handler decide between firing
    *  collab:preview_stopped (clean exit we triggered) vs collab:preview_failed
@@ -551,6 +575,7 @@ export function launchPreview(
     startedAt: now,
     lastTraffic: now,
     _log: [],
+    _lastOutput: now,
     recentLog: [],
     errorMessage: undefined,
     child,
@@ -576,6 +601,14 @@ export function launchPreview(
   // compare against the previous preview's last-seen HEAD, generating a
   // spurious "branch changed" → auto-restart loop on the first LLM turn.
   lastKnownHead = null
+
+  // V2 telemetry — log whether the framework dep-optimization cache survived
+  // the previous container.  Angular CLI / Vite write to `<repo>/.angular/cache`,
+  // which lives on EFS and SHOULD persist across deploys; when it does, the
+  // second-launch compile drops from ~2 min to ~20 s.  If this logs "absent"
+  // on a session that's been launched before, the cache is getting wiped and
+  // that's a regression worth chasing.  Cheap + best-effort; never throws.
+  logPreviewCacheState(cwd)
 
   wireChildStreams(state)
   startSweepLoop()
@@ -756,6 +789,30 @@ export async function maybeRestartOnBranchChange(): Promise<void> {
 
 // ── Internal wiring ────────────────────────────────────────────────────────
 
+/**
+ * Best-effort V2 telemetry: log the framework dep-optimization cache state so
+ * we can confirm it persists across container restarts (the thing that makes
+ * a second-launch compile fast).  Shallow + bounded — counts top-level
+ * entries under `.angular/cache`, never walks the whole tree, never throws.
+ */
+function logPreviewCacheState(cwd: string): void {
+  try {
+    const cacheDir = join(cwd, ".angular", "cache")
+    if (!existsSync(cacheDir)) {
+      console.log(`[collab.preview] framework cache: absent at ${cacheDir} (cold compile expected)`)
+      return
+    }
+    const entries = readdirSync(cacheDir)
+    const mtime = statSync(cacheDir).mtimeMs
+    const ageMin = Math.round((Date.now() - mtime) / 60_000)
+    console.log(
+      `[collab.preview] framework cache: present (${entries.length} top-level entr${entries.length === 1 ? "y" : "ies"}, last-modified ${ageMin}m ago) — warm compile expected`,
+    )
+  } catch (err) {
+    console.warn("[collab.preview] framework cache probe failed (non-fatal):", err)
+  }
+}
+
 function wireChildStreams(state: ActiveState): void {
   const onLine = (stream: "stdout" | "stderr") => (chunk: Buffer) => {
     // Stop emitting log/state events for a child whose state has been
@@ -765,6 +822,10 @@ function wireChildStreams(state: ActiveState): void {
     // surface in the SPA as zombie log lines AFTER the user already saw
     // "Preview stopped".
     if (active !== state) return
+
+    // Feed the install-hang watchdog (S1): any output — progress, warning,
+    // error — counts as liveness.  Reset the clock before processing lines.
+    state._lastOutput = Date.now()
 
     const lines = chunk.toString("utf8").split("\n").filter(Boolean)
     for (const line of lines) {
@@ -821,6 +882,13 @@ function wireChildStreams(state: ActiveState): void {
         }
         if (ready) {
           ;(state as { status: PreviewStatus }).status = "running"
+          // S2: a clean install → running transition means this workspace is
+          // healthy; reset its crash-loop counter so a future transient
+          // failure starts from zero and the breaker doesn't fire on a
+          // session that's actually fine.  Fire-and-forget DB write.
+          void import("./session")
+            .then((Session) => Session.clearPreviewCrashCount(state.collabSessionId))
+            .catch((err) => console.warn("[collab.preview] clearPreviewCrashCount failed:", err))
           broadcast(state.collabSessionId, {
             type: "collab:preview_started",
             state: getPreviewState()!,
@@ -874,6 +942,20 @@ function wireChildStreams(state: ActiveState): void {
     // as a failure so the user can read the tail of the log and Retry.
     const msg = `Preview process exited with code ${code} ${signal ? `(signal ${signal})` : ""}`
     console.error(`[collab.preview] ${msg}`)
+
+    // S2 crash-loop breaker: only an INSTALL-phase crash feeds the counter.
+    // A crash after reaching "running" is a different failure class (dev
+    // server runtime error) and shouldn't suppress boot-resume — the
+    // workspace installed fine, so resuming it on the next boot is
+    // reasonable.  An install crash, by contrast, tends to be deterministic
+    // (broken lockfile, missing dep, OOM during native build) and WILL
+    // recur on every boot — that's exactly what the breaker guards against.
+    if (state.status === "installing") {
+      void import("./session")
+        .then((Session) => Session.recordPreviewCrash(state.collabSessionId))
+        .catch((err) => console.warn("[collab.preview] recordPreviewCrash failed:", err))
+    }
+
     ;(state as { status: PreviewStatus }).status = "failed"
     ;(state as { errorMessage?: string }).errorMessage = msg
     broadcast(state.collabSessionId, {
@@ -919,6 +1001,29 @@ function startSweepLoop(): void {
     //    is unused; stop it to free the slot for another session.
     if (now - active.lastTraffic > IDLE_TIMEOUT_MS) {
       stopPreview(`idle ${Math.round(IDLE_TIMEOUT_MS / 60_000)}m`)
+      return
+    }
+
+    // 1b. Install-hang watchdog (S1) — a preview still in the `installing`
+    //     phase that has emitted zero output for INSTALL_SILENCE_TIMEOUT_MS
+    //     is presumed wedged.  A healthy pnpm install / ng compile emits
+    //     progress constantly, so prolonged silence means a dead registry,
+    //     stuck native build, or an OOMing dep holding memory with no
+    //     forward progress.  Stop it now rather than waiting out the 30 min
+    //     idle cap (which never fires here — no request traffic during
+    //     install).  We record the crash explicitly here (rather than
+    //     relying on the exit handler, which skips crash-recording when WE
+    //     initiated the stop) so a workspace that hangs install on every
+    //     boot eventually trips the crash-loop breaker instead of wasting
+    //     5 min per boot indefinitely.
+    if (active.status === "installing" && now - active._lastOutput > INSTALL_SILENCE_TIMEOUT_MS) {
+      const hungSession = active.collabSessionId
+      void import("./session")
+        .then((Session) => Session.recordPreviewCrash(hungSession))
+        .catch((err) => console.warn("[collab.preview] recordPreviewCrash (hang) failed:", err))
+      stopPreview(
+        `install hung — no output for ${Math.round(INSTALL_SILENCE_TIMEOUT_MS / 60_000)}m — Driver can re-Launch`,
+      )
       return
     }
 
@@ -989,7 +1094,13 @@ export async function resumePreviewsOnBoot(): Promise<void> {
     return
   }
 
-  let intents: Array<{ collabSessionId: string; repoFullName: string; at: number }>
+  let intents: Array<{
+    collabSessionId: string
+    repoFullName: string
+    at: number
+    crashCount: number
+    crashAt: number
+  }>
   try {
     intents = session.listPreviewIntents()
   } catch (err) {
@@ -1037,12 +1148,35 @@ export async function resumePreviewsOnBoot(): Promise<void> {
   }
   if (fresh.length === 0) return
 
+  // Crash-loop breaker (S2).  A fresh intent whose workspace has crashed
+  // during install BREAKER_CRASH_THRESHOLD+ times within the recent window
+  // is almost certainly deterministically broken (bad lockfile, missing
+  // dep, OOM during native build) — auto-resuming it just burns another
+  // install attempt + memory every boot.  Skip those; the Driver can press
+  // Launch manually (which clears the counter and overrides the breaker)
+  // once they've fixed the underlying workspace/config issue.  The freshness
+  // cap above handles age; this handles repeated failure within the window.
+  const eligible: typeof fresh = []
+  for (const i of fresh) {
+    const recentlyTripped = i.crashAt > 0 && now - i.crashAt < BREAKER_WINDOW_MS
+    if (i.crashCount >= BREAKER_CRASH_THRESHOLD && recentlyTripped) {
+      console.warn(
+        `[collab.preview] resumePreviewsOnBoot: session=${i.collabSessionId} repo=${i.repoFullName} ` +
+          `skipped — crash-loop breaker (${i.crashCount} install crashes within ${Math.round(BREAKER_WINDOW_MS / 60_000)}m). ` +
+          `Driver must Launch manually to retry.`,
+      )
+      continue
+    }
+    eligible.push(i)
+  }
+  if (eligible.length === 0) return
+
   // First-launch-wins constraint (one preview per container) means we pick
   // the most-recently active intent and ignore the rest.  If multiple
   // intents survived to disk, the rest will sit clear in the DB until a
   // Driver explicitly Launches one — we never auto-stomp a more-recent
   // wish in favour of a stale one.
-  const pick = fresh[0]
+  const pick = eligible[0]
   console.log(
     `[collab.preview] resumePreviewsOnBoot: ${intents.length} intent(s) on disk; picking session=${pick.collabSessionId} repo=${pick.repoFullName} (most-recent)`,
   )

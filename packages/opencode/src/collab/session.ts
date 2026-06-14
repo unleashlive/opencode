@@ -1,4 +1,4 @@
-import { Database, eq, and, isNull } from "@/storage/db"
+import { Database, eq, and, isNull, sql } from "@/storage/db"
 import {
   CollabSessionTable,
   CollabParticipantTable,
@@ -229,13 +229,21 @@ export function setPreviewIntent(collabSessionId: string, repoFullName: string |
  * pick the most-recently-active one.  Soft-deleted sessions are excluded —
  * we never resurrect a preview for a session the Driver tore down.
  */
-export function listPreviewIntents(): Array<{ collabSessionId: string; repoFullName: string; at: number }> {
+export function listPreviewIntents(): Array<{
+  collabSessionId: string
+  repoFullName: string
+  at: number
+  crashCount: number
+  crashAt: number
+}> {
   return Database.use((db) => {
     const rows = db
       .select({
         id: CollabSessionTable.id,
         repo: CollabSessionTable.preview_intent,
         at: CollabSessionTable.preview_intent_at,
+        crashCount: CollabSessionTable.preview_crash_count,
+        crashAt: CollabSessionTable.preview_crash_at,
         deleted_at: CollabSessionTable.deleted_at,
       })
       .from(CollabSessionTable)
@@ -246,8 +254,43 @@ export function listPreviewIntents(): Array<{ collabSessionId: string; repoFullN
         collabSessionId: r.id,
         repoFullName: r.repo as string,
         at: r.at ? r.at.getTime() : 0,
+        crashCount: r.crashCount ?? 0,
+        crashAt: r.crashAt ? r.crashAt.getTime() : 0,
       }))
       .sort((a, b) => b.at - a.at)
+  })
+}
+
+/**
+ * Crash-loop breaker bookkeeping (S2).  Three operations:
+ *
+ *   recordPreviewCrash  — a preview's child process died non-zero while still
+ *                         installing.  Bump the counter + stamp now.
+ *   clearPreviewCrashCount — the preview reached "ready", OR a Driver pressed
+ *                         Launch manually.  Reset to 0 so a later transient
+ *                         failure starts fresh and a human retry overrides
+ *                         the breaker.
+ *
+ * Kept tiny + idempotent; all three no-op against a deleted/absent session.
+ */
+export function recordPreviewCrash(collabSessionId: string): void {
+  Database.use((db) => {
+    db.update(CollabSessionTable)
+      .set({
+        preview_crash_count: sql`${CollabSessionTable.preview_crash_count} + 1`,
+        preview_crash_at: new Date(),
+      })
+      .where(eq(CollabSessionTable.id, collabSessionId))
+      .run()
+  })
+}
+
+export function clearPreviewCrashCount(collabSessionId: string): void {
+  Database.use((db) => {
+    db.update(CollabSessionTable)
+      .set({ preview_crash_count: 0, preview_crash_at: null })
+      .where(eq(CollabSessionTable.id, collabSessionId))
+      .run()
   })
 }
 
