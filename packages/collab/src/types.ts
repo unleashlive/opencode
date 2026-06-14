@@ -215,6 +215,10 @@ export type CollabEvent =
         lastTraffic: number
         recentLog: ReadonlyArray<{ stream: "stdout" | "stderr"; line: string; ts: number }>
         errorMessage?: string
+        /** Absolute URL to open the preview — dedicated preview-host root
+         *  (`https://preview.…/`) when configured, else legacy `/preview/`.
+         *  Computed server-side; the SPA links to it verbatim. */
+        url: string
       }
     }
   | { type: "collab:preview_stopped"; collabSessionId: string }

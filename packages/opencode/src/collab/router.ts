@@ -604,9 +604,21 @@ function setSession(session: CookieSession): { token: string; header: string } {
       expires_at: expiresAt,
     }).run()
   })
+  // Scope the cookie to the collab subdomain tree so the dedicated preview
+  // host (preview.${COLLAB_DOMAIN}) receives it and the preview's root serve
+  // is authenticated by the same session — WITHOUT widening to the whole
+  // utils.unleashlive.com (which would leak the session token to unrelated
+  // sibling services).  `Domain=.collab.utils.unleashlive.com` covers the
+  // apex collab host AND every *.collab.utils.unleashlive.com.  Omit the
+  // attribute entirely when COLLAB_DOMAIN is unset (local dev) → host-only,
+  // unchanged behaviour.  SameSite=Lax is fine: the preview opens as a
+  // top-level new-tab navigation and subdomains of unleashlive.com are
+  // same-site regardless.
+  const collabDomain = process.env["COLLAB_DOMAIN"]?.trim().toLowerCase().split(":")[0]
+  const domainAttr = collabDomain ? `Domain=.${collabDomain}; ` : ""
   return {
     token,
-    header: `collab_sid=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${COOKIE_TTL_SECONDS}`,
+    header: `collab_sid=${token}; ${domainAttr}Path=/; HttpOnly; SameSite=Lax; Max-Age=${COOKIE_TTL_SECONDS}`,
   }
 }
 

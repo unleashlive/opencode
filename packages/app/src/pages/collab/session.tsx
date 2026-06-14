@@ -756,10 +756,10 @@ function CollabSessionInner(props: { me: Me }) {
               <For each={collab.previewPorts()}>
                 {(port) => (
                   <a
-                    href={`/preview/`}
+                    href={collab.previewState()?.url ?? `/preview/`}
                     target="_blank"
                     rel="noreferrer"
-                    title={`Open live preview (proxied to port ${port} via /preview/, the portless URL form)`}
+                    title={`Open live preview (served at ${collab.previewState()?.url ?? "/preview/"})`}
                     class="flex items-center gap-1 text-[10px] text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-1.5 py-0.5 rounded-full border border-emerald-500/30 transition-colors"
                   >
                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
