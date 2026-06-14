@@ -693,6 +693,56 @@ no two-writer SQLite-over-EFS race during the rollout, at the cost of a
    `Installing…` → `Running` banner re-appears within ~60 s without any
    Driver click.
 
+## Before merging an opencode-collab PR
+
+Lightweight manual review step using Claude Code's built-in `code-review`
+skill — no third-party install, no GitHub-app dependency.  Mandatory for
+high-blast-radius changes; optional for purely visual diffs.
+
+### When to run it
+
+| Path touched | `/code-review` required? |
+|---|---|
+| `packages/opencode/src/collab/**` | **yes** — server-side collab logic, easy to regress |
+| `Dockerfile` | **yes** — affects container shape for every session |
+| `.github/workflows/deploy-collab.yml` | **yes** — affects the deploy itself |
+| `packages/app/src/**` (frontend SPA only) | optional — easier to verify visually post-deploy |
+| `docs/**`, `*.md`, plan files | skip |
+
+### How to run it
+
+```bash
+gh pr checkout <pr-number>          # land the diff on a local branch
+# In the repo root, launch Claude Code (`claude` or your editor's
+# Claude Code integration), then in the chat:
+/code-review
+```
+
+The skill walks the staged diff, flags correctness / security / perf
+issues, and finishes with a recommend-merge / recommend-changes verdict.
+For collab-server PRs that change boot ordering, hooks, SQLite schema, or
+the preview lifecycle, a second pass with `/code-review --effort high` is
+worth the extra minutes.
+
+### What the skill does *not* cover
+
+- **Live behavior** — `/code-review` is static analysis.  For preview /
+  proxy / OOM behavior changes, supplement with a deploy off the branch
+  via `gh workflow run "Deploy collab" --ref <branch>` plus a CloudWatch
+  tail (see "Watch server" in this doc above).
+- **Cross-PR coupling** — if two PRs touch the same boot path
+  (e.g. resume-on-boot ordering changes), review each in isolation AND
+  read the diff of their merge order against `collab` HEAD before merging
+  the second.
+
+### Why not CodeRabbit / a GitHub app?
+
+Considered and deferred (2026-06-13): the manual skill catches the bug
+classes we actually hit (boot-order races, hook-overwrite cycles,
+freshness-cap regressions) without adding a third-party SaaS to the
+critical-path of every PR.  Revisit if the team grows past ~3 active
+contributors on the collab fork.
+
 ## Future enhancements (post-MVP)
 
 - **Live dev-server preview** — add the `/preview/<port>/*` path-based proxy described in Part A.  ~150 LOC; no infra change.
