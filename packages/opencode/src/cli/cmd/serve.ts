@@ -171,16 +171,19 @@ export const ServeCommand = effectCmd({
 
     // S7 — sweep orphan workspace directories on EFS (dirs with no live
     // session row, older than the 24 h safety floor).  Reclaims space left
-    // by failed cleanups / drift.  Fire-and-forget; per-dir failures log.
+    // by failed cleanups / drift.  DEFERRED ~90 s after boot (and unref'd) so
+    // it never runs during the ALB's startup health-check window — the sweep
+    // does slow EFS deletes, and even though it's now async (non-blocking),
+    // keeping it out of the boot path entirely is belt-and-suspenders against
+    // the 2026-06-14 crash-loop where a synchronous version blocked /healthz.
+    // Fire-and-forget; per-dir failures log.
     if (isCollabMode) {
-      yield* Effect.promise(async () => {
-        try {
-          const Workspace = await import("../../collab/workspace")
-          void Workspace.cleanupOrphanWorkspaces()
-        } catch (err) {
-          console.warn("[collab] orphan-workspace sweep skipped:", err)
-        }
-      })
+      const orphanSweepTimer = setTimeout(() => {
+        void import("../../collab/workspace")
+          .then((Workspace) => Workspace.cleanupOrphanWorkspaces())
+          .catch((err) => console.warn("[collab] orphan-workspace sweep skipped:", err))
+      }, 90_000)
+      if (typeof orphanSweepTimer.unref === "function") orphanSweepTimer.unref()
     }
 
     yield* Effect.never

@@ -11,6 +11,7 @@
 
 import { spawn } from "child_process"
 import { mkdirSync, rmSync, existsSync, writeFileSync, renameSync, readdirSync, statSync } from "fs"
+import { rm as rmAsync, stat as statAsync } from "fs/promises"
 import { join } from "path"
 import type { Participant } from "@opencode-ai/collab"
 
@@ -627,8 +628,23 @@ export function cleanupSessionWorkspace(collabSessionId: string): void {
  * 24 h, eliminating any boot-time TOCTOU against an in-progress init.
  *
  * Best-effort: per-dir failures log and continue.  Never throws.
+ *
+ * CRITICAL — must NOT block the event loop.  Each orphan is a ~1.5 GB tree on
+ * EFS (a network filesystem); the original synchronous `rmSync(recursive)`
+ * blocked the loop for minutes while deleting several of them on boot, so
+ * /healthz couldn't respond and the ALB health check timed out → the task was
+ * killed mid-sweep and crash-looped (observed 2026-06-14, right after this
+ * sweep first shipped).  We now use the async `fs/promises` `rm`/`stat` and
+ * `await` each deletion: libuv does the filesystem work off-thread, so the
+ * loop stays free to answer /healthz between deletions.  The caller also
+ * defers the sweep until well after boot (see serve.ts), and we cap how many
+ * we remove per boot so a large backlog drains over a few restarts instead of
+ * one marathon run.
  */
 const ORPHAN_WORKSPACE_MIN_AGE_MS = 24 * 60 * 60 * 1000
+/** Max orphan dirs removed per boot — bounds a single sweep's wall-clock /
+ *  EFS load.  A backlog larger than this drains over subsequent boots. */
+const ORPHAN_WORKSPACE_MAX_PER_SWEEP = 10
 
 export async function cleanupOrphanWorkspaces(): Promise<void> {
   const root = workspaceRoot()
@@ -656,13 +672,21 @@ export async function cleanupOrphanWorkspaces(): Promise<void> {
   const now = Date.now()
   let removed = 0
   for (const name of entries) {
+    if (removed >= ORPHAN_WORKSPACE_MAX_PER_SWEEP) {
+      console.log(
+        `[collab.workspace] cleanupOrphanWorkspaces: hit per-sweep cap (${ORPHAN_WORKSPACE_MAX_PER_SWEEP}); remaining orphans drain next boot`,
+      )
+      break
+    }
     if (liveIds.has(name)) continue // live session — leave it
     const dir = join(root, name)
     try {
-      const st = statSync(dir)
+      // Async stat + rm — each `await` yields the event loop so /healthz keeps
+      // answering while EFS does the (slow) recursive delete off-thread.
+      const st = await statAsync(dir)
       if (!st.isDirectory()) continue
       if (now - st.mtimeMs < ORPHAN_WORKSPACE_MIN_AGE_MS) continue // too fresh — protect against init races
-      rmSync(dir, { recursive: true, force: true })
+      await rmAsync(dir, { recursive: true, force: true })
       removed++
       console.log(`[collab.workspace] cleanupOrphanWorkspaces: removed orphan workspace ${name}`)
     } catch (err) {
