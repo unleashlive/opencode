@@ -27,6 +27,7 @@ import type { IncomingMessage } from "node:http"
 import type { Socket } from "node:net"
 import { lookupCookieIdentityFromHeaders } from "./cookie-auth"
 import { getActiveUpstreamScheme, getActivePreviewPort, getActiveServePath } from "./preview-launcher"
+import { previewHost } from "./preview-host"
 
 const PREVIEW_PREFIX = "/preview/"
 
@@ -295,7 +296,22 @@ export function attachPreviewUpgrade(server: {
   server.on("upgrade", (req, clientSocket, head) => {
     const url = req.url ?? "/"
     const pathname = url.split("?", 1)[0]!
-    const parsed = parsePreviewPath(pathname)
+
+    // Two ways an upgrade is "ours":
+    //  1. Host-based — the request arrived on the dedicated preview host
+    //     (preview.collab…).  The WHOLE path is the preview; route the full
+    //     pathname to the active preview's port at root.
+    //  2. Path-based — legacy `/preview/<port>/…` on the main host (local
+    //     dev / fallback when no preview host is configured).
+    const reqHost = ((req.headers["host"] as string | undefined) ?? "").toLowerCase().split(":")[0]
+    const ph = previewHost()
+    let parsed: { port: number; rest: string } | null
+    if (ph && reqHost === ph) {
+      const activePort = getActivePreviewPort()
+      parsed = activePort === null ? null : { port: activePort, rest: pathname || "/" }
+    } else {
+      parsed = parsePreviewPath(pathname)
+    }
     if (!parsed) {
       // Not ours — leave the socket alone so other upgrade listeners (e.g.
       // opencode's own WebSocket routes) can claim it.

@@ -37,6 +37,7 @@ import { spawn, type ChildProcess } from "child_process"
 import { existsSync, readFileSync } from "fs"
 import { join } from "path"
 import { repoWorkspacePath } from "./workspace"
+import { previewUrl } from "./preview-host"
 import type { CollabEvent } from "@opencode-ai/collab"
 
 // ── Configuration ──────────────────────────────────────────────────────────
@@ -160,6 +161,11 @@ export interface PreviewStateSnapshot {
   /** Last N lines of combined stdout+stderr — for the install/run UI. */
   readonly recentLog: ReadonlyArray<{ stream: "stdout" | "stderr"; line: string; ts: number }>
   readonly errorMessage?: string
+  /** Absolute URL the SPA should link to for opening this preview.
+   *  `https://${previewHost()}/` when a dedicated preview host is configured
+   *  (root serve), else the legacy portless `/preview/` path.  Computed
+   *  server-side so the SPA never hard-codes the host. */
+  readonly url: string
 }
 
 interface ActiveState extends PreviewStateSnapshot {
@@ -342,6 +348,7 @@ export function getPreviewState(): PreviewStateSnapshot | null {
     lastTraffic: active.lastTraffic,
     recentLog: active._log.slice(-LOG_LINES_RETAINED),
     errorMessage: active.errorMessage,
+    url: previewUrl(),
   }
 }
 

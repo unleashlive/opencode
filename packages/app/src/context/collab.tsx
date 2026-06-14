@@ -88,6 +88,10 @@ export interface PreviewStateSnapshot {
   lastTraffic: number
   recentLog: ReadonlyArray<{ stream: "stdout" | "stderr"; line: string; ts: number }>
   errorMessage?: string
+  /** Absolute URL to open the preview (server-computed): the dedicated
+   *  preview-host root when configured, else the legacy `/preview/`.
+   *  Optional for resilience against older servers. */
+  url?: string
 }
 
 const CollabContext = createContext<CollabContextValue>()

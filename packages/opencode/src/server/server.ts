@@ -3,7 +3,8 @@ import "./init-projectors"
 import { handleCollabRequest } from "@/collab/router"
 import { parsePreviewPath, handlePreviewHttp, attachPreviewUpgrade } from "@/collab/preview-router"
 import { cookieAuthorizesRequest, lookupCookieIdentity } from "@/collab/cookie-auth"
-import { markPreviewTraffic } from "@/collab/preview-launcher"
+import { markPreviewTraffic, getActivePreviewPort } from "@/collab/preview-launcher"
+import { previewHost } from "@/collab/preview-host"
 import { Database } from "@/storage/db"
 import { NodeHttpServer } from "@effect/platform-node"
 import * as Log from "@opencode-ai/core/util/log"
@@ -28,10 +29,45 @@ const serverStartedAt = Date.now()
 // route can serve index.html for them. Bridges the standard Web Request/Response
 // API used by the collab router into Effect's HttpServerRequest/HttpServerResponse.
 
+// Friendly page shown at the preview host when nothing is running yet.
+const NO_PREVIEW_HTML =
+  `<!doctype html><meta charset="utf-8"><title>No preview running</title>` +
+  `<body style="font:14px system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem;color:#27272a">` +
+  `<h1 style="font-size:1.1rem">No preview is currently running</h1>` +
+  `<p>A collab Driver needs to launch the dev-server preview from the session sidebar. ` +
+  `Once it's up, this host serves it at the root.</p></body>`
+
+/**
+ * Convert the proxied upstream `Response` from handlePreviewHttp into an
+ * Effect HttpServerResponse, streaming the body without buffering (video,
+ * large downloads, SSE all work).  Shared by the dedicated-preview-host
+ * branch and the legacy `/preview/` path branch.
+ */
+function previewServerResponse(webResponse: Response) {
+  const previewHeaders = new Headers(webResponse.headers)
+  if (webResponse.body) {
+    const previewStream = Stream.fromAsyncIterable(
+      webResponse.body as AsyncIterable<Uint8Array>,
+      () => new Error("Preview stream error"),
+    )
+    return HttpServerResponse.stream(previewStream, {
+      status: webResponse.status,
+      headers: previewHeaders,
+    })
+  }
+  return HttpServerResponse.raw(new Uint8Array(), {
+    status: webResponse.status,
+    headers: previewHeaders,
+  })
+}
+
 const collabMiddleware: HttpMiddleware.HttpMiddleware = (app) =>
   Effect.gen(function* () {
     const req = yield* HttpServerRequest.HttpServerRequest
     const pathname = new URL(req.url, "http://localhost").pathname
+    // Lower-cased, port-stripped Host for the dedicated-preview-host routing
+    // below.  Effect's HttpServerRequest exposes the raw header map.
+    const host = (req.headers["host"] ?? "").toLowerCase().split(":")[0]
 
     // /healthz — ALB / ECS health probe.  Sits ahead of every other route so
     // a degraded collab/preview path can't fail the liveness check on its own.
@@ -39,6 +75,39 @@ const collabMiddleware: HttpMiddleware.HttpMiddleware = (app) =>
     // task out of rotation and ECS replaces it.
     if (pathname === "/healthz") {
       return yield* serveHealthz()
+    }
+
+    // Dedicated preview host — root serve.  When the request arrived on
+    // `preview.collab…` the ENTIRE host is the single active preview served
+    // at root (base href "/"), byte-for-byte like a develop serve.  This
+    // MUST come before the `/`→/collab/new landing below, since on the
+    // preview host `/` is the preview's index.html, not the collab landing.
+    // (/healthz is handled above this, so ALB health checks are unaffected
+    // regardless of Host.)
+    const ph = previewHost()
+    if (ph && host === ph) {
+      const webRequest = yield* HttpServerRequest.toWeb(req)
+      // Same shell-trust gate as the legacy path (ADR-0001): a valid collab
+      // cookie is enough.  cookieAuthorizesRequest now allows when the Host
+      // is the preview host (see cookie-auth.ts rule a0).
+      if (cookieAuthorizesRequest(webRequest) !== "allow") {
+        return HttpServerResponse.raw(new TextEncoder().encode("Forbidden"), {
+          status: 403,
+          headers: new Headers({ "content-type": "text/plain" }),
+        })
+      }
+      markPreviewTraffic()
+      const port = getActivePreviewPort()
+      if (port === null) {
+        return HttpServerResponse.raw(new TextEncoder().encode(NO_PREVIEW_HTML), {
+          status: 200,
+          headers: new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }),
+        })
+      }
+      // Root serve: forward the WHOLE pathname (servePath is null now that the
+      // frontend builds at base href "/"), so /assets/x.js → /assets/x.js.
+      const webResponse = yield* Effect.promise(() => handlePreviewHttp(webRequest, port, pathname || "/"))
+      return previewServerResponse(webResponse)
     }
 
     // GET / and GET /collab — collab landing.  Authenticated users are
@@ -53,9 +122,26 @@ const collabMiddleware: HttpMiddleware.HttpMiddleware = (app) =>
       return yield* Effect.sync(() => HttpServerResponse.fromWeb(serveCollabLanding(webRequest)))
     }
 
-    // /preview/<port>/<rest> — HTTP reverse proxy to a dev server running
-    // inside this container.  WebSocket upgrades for the same path are
-    // handled separately by attachPreviewUpgrade on the http.Server.
+    // Legacy `/preview/...` on the MAIN host, when a dedicated preview host
+    // IS configured → 301 to the subdomain root so old links + bookmarks keep
+    // working and there's one canonical preview origin.  Done by prefix (not
+    // parsePreviewPath) so the redirect fires even when no preview is active
+    // (parsePreviewPath's portless form returns null then).  Strip an optional
+    // leading `<port>/` segment so the redirect preserves the deep path.
+    if (ph && pathname.startsWith("/preview/")) {
+      const afterPrefix = pathname.slice("/preview/".length)
+      const segs = afterPrefix.split("/")
+      const rest = /^\d+$/.test(segs[0] ?? "") ? "/" + segs.slice(1).join("/") : "/" + afterPrefix
+      const location = `https://${ph}${rest}${new URL(req.url, "http://localhost").search}`
+      return HttpServerResponse.raw(new Uint8Array(), {
+        status: 301,
+        headers: new Headers({ location, "cache-control": "no-store" }),
+      })
+    }
+
+    // Legacy `/preview/<port>/<rest>` path-based proxy — only the local-dev
+    // fallback now (no preview host configured).  WebSocket upgrades are
+    // handled separately by attachPreviewUpgrade.
     const previewParsed = parsePreviewPath(pathname)
     if (previewParsed) {
       const webRequest = yield* HttpServerRequest.toWeb(req)
@@ -77,23 +163,7 @@ const collabMiddleware: HttpMiddleware.HttpMiddleware = (app) =>
       const webResponse = yield* Effect.promise(() =>
         handlePreviewHttp(webRequest, previewParsed.port, previewParsed.rest),
       )
-      const previewHeaders = new Headers(webResponse.headers)
-      // The upstream body is a stream — let Effect pipe it through without
-      // buffering, so video / large downloads / SSE all work.
-      if (webResponse.body) {
-        const previewStream = Stream.fromAsyncIterable(
-          webResponse.body as AsyncIterable<Uint8Array>,
-          () => new Error("Preview stream error"),
-        )
-        return HttpServerResponse.stream(previewStream, {
-          status: webResponse.status,
-          headers: previewHeaders,
-        })
-      }
-      return HttpServerResponse.raw(new Uint8Array(), {
-        status: webResponse.status,
-        headers: previewHeaders,
-      })
+      return previewServerResponse(webResponse)
     }
 
     // Only intercept collab API/auth/invite paths — let UI routes fall through to index.html

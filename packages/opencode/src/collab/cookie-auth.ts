@@ -28,6 +28,7 @@ import {
   CollabRepoTable,
 } from "./schema.sql"
 import { decryptToken, isEncrypted } from "./crypto"
+import { previewHost } from "./preview-host"
 
 // NOTE: the auth gate only needs the cookie holder's identity
 // (github_id, github_login) for the participation check.  The encrypted
@@ -318,6 +319,16 @@ export function cookieAuthorizesRequest(req: Request): CookieAuthDecision {
   if (!id) return "fallthrough"
 
   const url = new URL(req.url, "http://localhost")
+
+  // Rule (a0): the dedicated preview host.  When the request arrived on
+  // `preview.collab…`, the ENTIRE host is the single active preview served
+  // at root — every path is a preview asset.  Same shell-trust model as the
+  // legacy `/preview/*` path (ADR-0001): a valid cookie alone is enough, no
+  // scope check.  Host comes off the Host header (url above is normalised to
+  // localhost and can't carry it).
+  const reqHost = (req.headers.get("host") ?? "").toLowerCase().split(":")[0]
+  const ph = previewHost()
+  if (ph && reqHost === ph) return "allow"
 
   // Rule (a): cookie-only paths (no scope check needed).
   if (cookieAllowedWithoutScope(url.pathname)) return "allow"
