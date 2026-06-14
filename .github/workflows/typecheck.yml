@@ -1,0 +1,118 @@
+name: typecheck-lint
+
+# PR quality gates for this fork, complementing parse-smoke.yml (which only
+# catches Bun *parse* failures, not type errors — that's how the TS2741 in
+# PR #45 slipped through).  Two jobs:
+#
+#   typecheck-ratchet — runs `tsgo --noEmit` on BOTH the PR head and the base
+#     branch, and fails only on type errors the PR INTRODUCES.  A plain
+#     `tsgo --noEmit` gate is impossible here: the fork carries ~20 pre-existing
+#     TS errors (Drizzle drift, date/number mixups — see parse-smoke.yml) that
+#     the runtime tolerates but tsgo rejects, so it would be red on day one.
+#     The base-vs-head ratchet lets that debt through while catching anything
+#     new.  No committed baseline to maintain — the base branch IS the baseline.
+#
+#   lint-changed — runs oxlint on the PR's changed .ts/.tsx files only, so a new
+#     lint error fails the build without being blocked by (or needing a baseline
+#     for) lint debt in files the PR didn't touch.
+#
+# Both run on GitHub-hosted ubuntu-latest (not the absent Blacksmith runners).
+
+on:
+  pull_request:
+    branches: [collab]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck-ratchet:
+    name: Typecheck (no new errors vs base)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Bun + install deps
+        uses: ./.github/actions/setup-bun
+
+      - name: Collect type errors — PR head
+        run: bash .github/scripts/collect-type-errors.sh > "$RUNNER_TEMP/head.txt"
+
+      - name: Collect type errors — base
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          # Fetch just the base commit and check it out in a separate worktree,
+          # reusing the already-installed node_modules (type defs) via symlink
+          # so we don't pay a second multi-minute `bun install`.  Base + head
+          # share a lockfile in the overwhelming majority of PRs; if a PR
+          # changes dependencies, the base typecheck runs against head's
+          # node_modules — worst case a spurious new/missing signature the
+          # author can see in the log.
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$RUNNER_TEMP/base/node_modules"
+          for d in packages/*; do
+            if [ -d "$GITHUB_WORKSPACE/$d/node_modules" ]; then
+              ln -s "$GITHUB_WORKSPACE/$d/node_modules" "$RUNNER_TEMP/base/$d/node_modules" || true
+            fi
+          done
+          ( cd "$RUNNER_TEMP/base" && bash "$GITHUB_WORKSPACE/.github/scripts/collect-type-errors.sh" ) > "$RUNNER_TEMP/base.txt"
+
+      - name: Fail on NEW type errors
+        if: github.event_name == 'pull_request'
+        run: |
+          set -uo pipefail
+          base_n=$(wc -l < "$RUNNER_TEMP/base.txt" | tr -d ' ')
+          head_n=$(wc -l < "$RUNNER_TEMP/head.txt" | tr -d ' ')
+          echo "type-error signatures — base: ${base_n}, head: ${head_n}"
+          new="$(comm -13 <(sort -u "$RUNNER_TEMP/base.txt") <(sort -u "$RUNNER_TEMP/head.txt") || true)"
+          if [ -n "$new" ]; then
+            echo "::error::This PR introduces NEW TypeScript errors not present on the base branch:"
+            printf '%s\n' "$new" | sed 's/^/  ✗ /'
+            echo ""
+            echo "Run 'bun run typecheck' locally to reproduce. Fix the new errors before merging."
+            exit 1
+          fi
+          echo "✅ No new TypeScript errors vs base."
+
+      - name: Report (manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "Current type-error signatures on this ref:"
+          sed 's/^/  • /' "$RUNNER_TEMP/head.txt" || true
+          echo "(workflow_dispatch is informational only — no pass/fail)"
+
+  lint-changed:
+    name: Lint changed files (oxlint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Bun + install deps
+        uses: ./.github/actions/setup-bun
+
+      - name: oxlint changed TS/TSX
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -uo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          # Two-dot diff (base.sha vs HEAD) — compares the two trees directly,
+          # so it needs only those two commits present (no merge-base history).
+          mapfile -t files < <(git diff --name-only --diff-filter=ACMR "$BASE_SHA" HEAD -- '*.ts' '*.tsx' || true)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No changed .ts/.tsx files — nothing to lint."
+            exit 0
+          fi
+          printf 'Linting %d changed file(s):\n' "${#files[@]}"
+          printf '  %s\n' "${files[@]}"
+          bunx oxlint "${files[@]}"
