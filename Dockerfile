@@ -70,6 +70,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip3 install --break-system-packages --no-cache-dir 'headroom-ai[mcp]' && \
     headroom --version | head -1
 
+# Install Playwright MCP (microsoft/playwright-mcp) + a version-matched headless
+# Chromium.  Registered as an OFF-by-default MCP server in opencode.json (see
+# below); a Driver toggles it on per session from the iframe's MCP panel when a
+# session needs browser automation.  Baking the browser at build time
+# (PLAYWRIGHT_BROWSERS_PATH) means the first connect launches instantly with no
+# runtime download — and no network dependency at all on a cold task.
+#
+# Version pinning matters: @playwright/mcp bundles an EXACT playwright build, and
+# playwright matches browsers by a revision number baked into the folder name
+# (chromium-NNNN).  So we install Chromium via the SAME playwright that ships
+# inside the pinned @playwright/mcp (its nested node_modules .bin), never a
+# floating `npx playwright@latest`, which could fetch a mismatched revision the
+# MCP can't find.  Bin name is `playwright-mcp` (npm `bin` field); it lands on
+# the global npm bin dir (on PATH for uid 10001, same as the pip-installed
+# `headroom`).  PLAYWRIGHT_BROWSERS_PATH is set once here in the deps stage and
+# inherits into the final image, so it applies to both this build-time install
+# and the runtime spawn.  --with-deps pulls the Chromium apt libs (root only;
+# this stage is root).
+ENV PLAYWRIGHT_BROWSERS_PATH=/home/opencode/.cache/playwright
+RUN set -eux; \
+    npm install --global @playwright/mcp@0.0.76; \
+    PW="$(npm root -g)/@playwright/mcp/node_modules/.bin/playwright"; \
+    if [ ! -x "$PW" ]; then PW="$(npm root -g)/.bin/playwright"; fi; \
+    if [ ! -x "$PW" ]; then PW="playwright"; fi; \
+    "$PW" install --with-deps chromium; \
+    command -v playwright-mcp; \
+    playwright-mcp --version; \
+    ls -d "$PLAYWRIGHT_BROWSERS_PATH"/chromium-*
+
 # Rewrite ssh-form GitHub URLs to HTTPS at the system level.  Every flavour
 # pnpm / npm / yarn could produce gets normalised to `https://github.com/`:
 #
@@ -158,6 +187,8 @@ RUN mkdir -p /var/opencode/workspaces \
              /home/opencode/.config/opencode/agent \
              /home/opencode/.cache/opencode/packages \
              /home/opencode/.cache/headroom \
+             /home/opencode/.cache/playwright \
+             /home/opencode/.cache/playwright-output \
              /home/opencode/.claude && \
     # Bake a container-wide opencode config:
     #   - `plugin`: pre-installed opencode-claude-auth (cached above at /root)
@@ -177,10 +208,22 @@ RUN mkdir -p /var/opencode/workspaces \
     # Top-level opencode config — plugin + disabled providers + the Headroom
     # MCP server registration.  Schema in
     # packages/opencode/src/config/mcp.ts; `type: local` means opencode
-    # spawns the command itself and speaks MCP over stdio.  Timeout is
-    # generous (10 s) because Headroom's first run lazy-loads its compressor
-    # models; subsequent calls are sub-second.
-    printf '{"plugin":["opencode-claude-auth@latest"],"disabled_providers":["amazon-bedrock"],"mcp":{"headroom":{"type":"local","command":["headroom","mcp"],"enabled":true,"timeout":10000}}}\n' \
+    # spawns the command itself and speaks MCP over stdio.  The stdio server
+    # is `headroom mcp serve` — `mcp` alone is the subcommand GROUP (install /
+    # status / uninstall / serve); spawning it with no action just prints help
+    # and exits, so the MCP handshake never completes and opencode flags the
+    # server with a red "failed" dot.  Timeout is generous (30 s) because
+    # Headroom's first run lazy-loads its compressor models; subsequent calls
+    # are sub-second.
+    # The `playwright` entry is the browser-automation MCP (see the install
+    # block above).  It is OFF by default (`enabled:false`) so no Chromium spins
+    # up unless a Driver toggles it on for a session — keeps idle memory off the
+    # 16 GB task that also runs the frontend preview build.  `--headless
+    # --no-sandbox` is mandatory for Chromium as the non-root opencode user
+    # without SYS_ADMIN; `--isolated` gives each connect a throwaway profile (no
+    # cross-session state, no disk growth).  60 s timeout because the first
+    # connect launches the browser.
+    printf '{"plugin":["opencode-claude-auth@latest"],"disabled_providers":["amazon-bedrock"],"mcp":{"headroom":{"type":"local","command":["headroom","mcp","serve"],"enabled":true,"timeout":30000},"playwright":{"type":"local","command":["playwright-mcp","--headless","--no-sandbox","--isolated","--browser","chromium","--output-dir","/home/opencode/.cache/playwright-output"],"environment":{"PLAYWRIGHT_BROWSERS_PATH":"/home/opencode/.cache/playwright"},"enabled":false,"timeout":60000}}}\n' \
       > /home/opencode/.config/opencode/opencode.json && \
     # Global AGENTS.md — opencode auto-loads $XDG_CONFIG_HOME/opencode/AGENTS.md
     # (= /home/opencode/.config/opencode/AGENTS.md here) into the system
@@ -205,6 +248,12 @@ RUN mkdir -p /var/opencode/workspaces \
       'Use `headroom_compress` whenever a tool result is likely above ~2,000 tokens — long log dumps, large file reads, RAG chunks, sprawling CloudWatch tails.  Originals stay reversible (no information loss); typical compression is 60–95%.  Skipping it on big outputs leaves obvious tokens on the table.' \
       '' \
       'Skip compression on short results (< ~1,000 tokens) — the overhead outweighs the savings.' \
+      '' \
+      '## Playwright MCP (browser automation)' \
+      '' \
+      'A headless-Chromium browser-automation server (`playwright`) is registered but **OFF by default**.  If a task needs to load a web page, click, fill a form, or capture a screenshot, ask a Driver to enable `playwright` in the session MCP panel first — until it shows a green dot the browser tools are unavailable.' \
+      '' \
+      'Once enabled, drive the browser with `browser_navigate`, `browser_click`, `browser_type`, `browser_snapshot` (accessibility tree — prefer it over screenshots for reading page state) and `browser_take_screenshot`.  Output lands in /home/opencode/.cache/playwright-output.  Reach for it to verify the live frontend preview, inspect a page the user references, or reproduce a UI bug — not for routine file edits.' \
       > /home/opencode/.config/opencode/AGENTS.md && \
     # Bake the "fast" agent into the container so it shows up in the iframe's
     # per-session agent picker.  Haiku-powered, minimal ceremony.  Users in
