@@ -1549,6 +1549,37 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
     })
   }
 
+  // GET /collab/session/:id/preview/holder — any participant.
+  // Identifies which collab session currently holds the single, container-wide
+  // preview slot, plus who's in that session — so a Driver who hits the
+  // "already running in session X" 409 can see whose Driver to ask to stop it
+  // (rather than just an opaque session id).  DELIBERATELY global: it reports
+  // the holder even when that's a DIFFERENT session than this one (that's the
+  // whole point).  Safe to expose — every collab participant is an org member
+  // (ADR-0001), and the 409 already leaks the holder's session id.  Returns
+  // null when no preview is running anywhere.
+  if (req.method === "GET" && parts[3] === "preview" && parts[4] === "holder") {
+    const cur = Preview.getPreviewState()
+    if (!cur) return json(null, 200)
+    const holder = Session.getCollabSession(cur.collabSessionId)
+    return json(
+      {
+        collabSessionId: cur.collabSessionId,
+        sessionName: holder?.name ?? null,
+        repoFullName: cur.repoFullName,
+        startedAt: cur.startedAt,
+        isSelf: cur.collabSessionId === sessionId,
+        participants: (holder?.participants ?? []).map((p) => ({
+          githubLogin: p.githubLogin,
+          githubAvatarUrl: p.githubAvatarUrl,
+          role: p.role,
+          isOnline: p.isOnline,
+        })),
+      },
+      200,
+    )
+  }
+
   // POST /collab/session/:id/pr — Driver only.  git push + open PR on GitHub.
   if (req.method === "POST" && parts[3] === "pr") {
     if (caller.role !== "driver") return json({ error: "Forbidden — Drivers only" }, 403)

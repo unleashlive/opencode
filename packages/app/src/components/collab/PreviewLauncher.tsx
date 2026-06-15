@@ -20,8 +20,8 @@
  */
 
 import { createMemo, createSignal, Show, For } from "solid-js"
-import { useCollab, type PreviewStateSnapshot } from "@/context/collab"
-import { BTN_PRIMARY, BTN_SUCCESS } from "./ui"
+import { useCollab, type PreviewStateSnapshot, type PreviewHolder } from "@/context/collab"
+import { BTN_PRIMARY, BTN_SUCCESS, BTN_SECONDARY } from "./ui"
 
 export function PreviewLauncher() {
   const collab = useCollab()
@@ -36,10 +36,28 @@ export function PreviewLauncher() {
   const [busy, setBusy] = createSignal(false)
   const [error, setError] = createSignal<string | null>(null)
 
+  // Who holds the single, container-wide preview slot — looked up on demand
+  // when a launch fails (typically the "already running in another session"
+  // 409) so the Driver can see whom to ask to stop it.  undefined = not looked
+  // up yet; null = nobody is running one.
+  const [holder, setHolder] = createSignal<PreviewHolder | null | undefined>(undefined)
+  const [holderBusy, setHolderBusy] = createSignal(false)
+
+  async function whoHasIt() {
+    if (holderBusy()) return
+    setHolderBusy(true)
+    try {
+      setHolder(await collab.previewHolder())
+    } finally {
+      setHolderBusy(false)
+    }
+  }
+
   async function launch() {
     if (busy() || !isDriver()) return
     setBusy(true)
     setError(null)
+    setHolder(undefined)
     try {
       await collab.launchPreview()
     } catch (err) {
@@ -145,7 +163,66 @@ export function PreviewLauncher() {
         </Show>
 
         <Show when={error()}>
-          <p class="text-[11px] text-red-400 px-1">{error()}</p>
+          <div class="px-1 space-y-1.5">
+            <p class="text-[11px] text-red-400">{error()}</p>
+            <button
+              type="button"
+              onClick={whoHasIt}
+              disabled={holderBusy()}
+              class={`${BTN_SECONDARY} w-full py-1 text-[11px]`}
+              title="Find which collab session is holding the preview slot, and who's in it"
+            >
+              {holderBusy() ? "Checking…" : "Who has the preview running?"}
+            </button>
+            <Show when={holder() !== undefined}>
+              <Show
+                when={holder()}
+                fallback={
+                  <p class="text-[11px] text-zinc-500">No preview is running right now — try launching again.</p>
+                }
+              >
+                {(h) => (
+                  <div class="rounded-md border border-zinc-700/60 bg-zinc-800/40 px-2 py-1.5 space-y-1">
+                    <Show
+                      when={!h().isSelf}
+                      fallback={<p class="text-[11px] text-zinc-300">This session already holds the preview.</p>}
+                    >
+                      <p class="text-[11px] text-zinc-300">
+                        Held by{" "}
+                        <span class="font-medium text-zinc-100">{h().sessionName ?? h().collabSessionId}</span>
+                        <span class="text-zinc-500"> · {h().repoFullName.split("/").pop()}</span>
+                      </p>
+                      <Show when={h().participants.length > 0}>
+                        <div class="flex flex-wrap gap-1">
+                          <For each={h().participants}>
+                            {(p) => (
+                              <a
+                                href={`https://github.com/${p.githubLogin}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                class="inline-flex items-center gap-1 rounded-full border border-zinc-700/50 bg-zinc-900/60 py-0.5 pl-0.5 pr-1.5 text-[10px] hover:border-zinc-500 transition-colors"
+                              >
+                                <img
+                                  src={p.githubAvatarUrl || `https://github.com/${p.githubLogin}.png?size=20`}
+                                  alt={p.githubLogin}
+                                  class="h-3.5 w-3.5 rounded-full"
+                                />
+                                <span class="text-zinc-300">@{p.githubLogin}</span>
+                                <Show when={p.role === "driver"}>
+                                  <span class="text-amber-400/80">driver</span>
+                                </Show>
+                              </a>
+                            )}
+                          </For>
+                        </div>
+                        <p class="text-[10px] text-zinc-500">Ask a Driver above to stop it, or wait for the idle timeout.</p>
+                      </Show>
+                    </Show>
+                  </div>
+                )}
+              </Show>
+            </Show>
+          </div>
         </Show>
       </div>
     </Show>
@@ -312,7 +389,15 @@ function Spinner() {
 }
 
 function humanize(err: unknown): string {
-  if (err instanceof Error) return err.message
-  return String(err)
+  const raw = err instanceof Error ? err.message : String(err)
+  // api() throws with the raw response body; collab routes return JSON like
+  // {"error":"…","existing":{…}}.  Surface the human message, not the JSON blob.
+  try {
+    const parsed = JSON.parse(raw) as { error?: unknown }
+    if (parsed && typeof parsed.error === "string") return parsed.error
+  } catch {
+    // not JSON — use as-is
+  }
+  return raw
 }
 
