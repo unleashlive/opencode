@@ -1,5 +1,6 @@
 import { createSignal, Show } from "solid-js"
 import { useCollab } from "@/context/collab"
+import { BTN_PRIMARY } from "./ui"
 
 export function InviteDialog(props: { onClose: () => void }) {
   const collab = useCollab()
@@ -56,7 +57,7 @@ export function InviteDialog(props: { onClose: () => void }) {
           fallback={
             <button
               onClick={generate}
-              class="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 rounded-lg text-sm transition-colors"
+              class={`${BTN_PRIMARY} w-full py-2 text-sm`}
             >
               Generate invite link
             </button>

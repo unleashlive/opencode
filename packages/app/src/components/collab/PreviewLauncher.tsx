@@ -21,6 +21,7 @@
 
 import { createMemo, createSignal, Show, For } from "solid-js"
 import { useCollab, type PreviewStateSnapshot } from "@/context/collab"
+import { BTN_PRIMARY, BTN_SUCCESS } from "./ui"
 
 export function PreviewLauncher() {
   const collab = useCollab()
@@ -86,7 +87,7 @@ export function PreviewLauncher() {
               onClick={launch}
               disabled={busy() || !isDriver()}
               title={!isDriver() ? "Drivers only" : undefined}
-              class="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white transition-colors"
+              class={`${BTN_PRIMARY} w-full py-2 text-sm`}
             >
               <Show
                 when={!busy()}
@@ -223,7 +224,7 @@ function RunningBanner(props: {
         href={url()}
         target="_blank"
         rel="noreferrer"
-        class="block text-center text-xs px-2 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-colors"
+        class={`${BTN_SUCCESS} w-full px-2 py-1.5 text-xs`}
       >
         Open preview ↗
       </a>

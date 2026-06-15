@@ -1828,7 +1828,9 @@ export default function Layout(props: ParentProps) {
   )
 
   createEffect(() => {
-    const sidebarWidth = layout.sidebar.opened() ? layout.sidebar.width() : 48
+    // In the collab iframe (?embed=collab) there is no project rail, so a
+    // collapsed sidebar should reserve ZERO width — not the native 48 px stub.
+    const sidebarWidth = layout.sidebar.opened() ? layout.sidebar.width() : isCollabEmbed() ? 0 : 48
     document.documentElement.style.setProperty("--dialog-left-margin", `${sidebarWidth}px`)
   })
 
@@ -2469,7 +2471,11 @@ export default function Layout(props: ParentProps) {
                   !state.sizing,
               }}
               style={{
-                "--main-left": layout.sidebar.opened() ? `${side()}px` : "4rem",
+                // Collapsed: native opencode keeps a 4rem project-rail stub,
+                // but the collab embed has no rail — collapse to 0 so the
+                // session-list column disappears completely and the iframe
+                // content spans full width. The titlebar toggle re-opens it.
+                "--main-left": layout.sidebar.opened() ? `${side()}px` : isCollabEmbed() ? "0px" : "4rem",
               }}
             >
               <main

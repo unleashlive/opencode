@@ -28,6 +28,7 @@ import { TeamNoteComposer } from "@/components/collab/TeamNoteComposer"
 import { PreviewLauncher } from "@/components/collab/PreviewLauncher"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import type { CollabRole, Participant, PromptSuggestion } from "@opencode-ai/collab"
+import { BTN_PRIMARY, BTN_SUCCESS, BTN_SECONDARY, PILL_BRAND } from "@/components/collab/ui"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -200,7 +201,7 @@ function OpenPrButton() {
         onClick={openPr}
         disabled={busy() || locked()}
         title={locked() ? "No commits on the collab branch yet — ask the LLM to make a commit first." : undefined}
-        class="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white transition-colors"
+        class={`${BTN_SUCCESS} w-full py-2 text-sm`}
       >
         <Show
           when={!busy()}
@@ -319,11 +320,7 @@ function PromptInput(props: {
         <button
           type="submit"
           disabled={busy() || !text().trim()}
-          class={`w-full py-2 rounded-lg text-sm font-medium transition-colors disabled:bg-zinc-700 disabled:text-zinc-500 ${
-            isDriver()
-              ? "bg-blue-600 hover:bg-blue-500 text-white"
-              : "bg-zinc-700 hover:bg-zinc-600 text-zinc-100"
-          }`}
+          class={`${isDriver() ? BTN_PRIMARY : BTN_SECONDARY} w-full py-2 text-sm`}
         >
           {busy()
             ? "Sending…"
@@ -584,7 +581,7 @@ function CollabSessionInner(props: { me: Me }) {
                   e.preventDefault()
                   window.location.href = "/collab/new"
                 }}
-                class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30 uppercase tracking-wider hover:bg-blue-500/30 hover:text-blue-300 transition-colors"
+                class={PILL_BRAND}
               >
                 Collab
               </a>
