@@ -75,6 +75,27 @@ interface CollabContextValue {
   stopPreview: () => Promise<void>
   /** Driver-only: stop + relaunch with the same config. */
   restartPreview: () => Promise<void>
+  /** Who currently holds the container-wide preview slot (any session), so a
+   *  Driver who hit the "already running" conflict can see whom to ask to stop
+   *  it.  Resolves null when no preview is running anywhere. */
+  previewHolder: () => Promise<PreviewHolder | null>
+}
+
+/** The collab session currently running the single preview + its participants.
+ *  Returned by GET /collab/session/:id/preview/holder. */
+export interface PreviewHolder {
+  collabSessionId: string
+  sessionName: string | null
+  repoFullName: string
+  startedAt: number
+  /** True when THIS session is the one holding the preview. */
+  isSelf: boolean
+  participants: Array<{
+    githubLogin: string
+    githubAvatarUrl: string
+    role: CollabRole
+    isOnline: boolean
+  }>
 }
 
 /** Mirrors PreviewStateSnapshot in collab/preview-launcher.ts. */
@@ -695,6 +716,19 @@ export function CollabProvider(props: CollabProviderProps) {
         }
       } catch {
         // SSE will fill in state shortly
+      }
+    },
+
+    async previewHolder() {
+      // Plain GET (not api()) — api() throws on !ok; here a non-200 just means
+      // "couldn't determine the holder", which we surface as null rather than
+      // an error.
+      try {
+        const res = await fetch(`/collab/session/${props.collabSessionId}/preview/holder`)
+        if (!res.ok) return null
+        return (await res.json()) as PreviewHolder | null
+      } catch {
+        return null
       }
     },
   }
