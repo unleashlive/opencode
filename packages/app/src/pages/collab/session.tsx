@@ -754,23 +754,31 @@ function CollabSessionInner(props: { me: Me }) {
               <div class="text-[10px] text-zinc-600 uppercase tracking-wider font-medium">
                 Repos
               </div>
-              <For each={collab.previewPorts()}>
-                {(port) => (
-                  <a
-                    href={collab.previewState()?.url ?? `/preview/`}
-                    target="_blank"
-                    rel="noreferrer"
-                    title={`Open live preview (served at ${collab.previewState()?.url ?? "/preview/"})`}
-                    class="flex items-center gap-1 text-[10px] text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-1.5 py-0.5 rounded-full border border-emerald-500/30 transition-colors"
-                  >
-                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    preview
-                    <svg class="w-2 h-2" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                    </svg>
-                  </a>
-                )}
-              </For>
+              {/* Preview pills only make sense for a preview-capable session
+                  (a frontend repo / one with .opencode-preview.json) — the dev
+                  server only runs stable for frontend code.  `availablePreview`
+                  is the same server signal that gates the Launch button, so the
+                  pill never appears for non-frontend sessions (where a detected
+                  port would just be another session's container-wide preview). */}
+              <Show when={collab.session()?.availablePreview}>
+                <For each={collab.previewPorts()}>
+                  {(port) => (
+                    <a
+                      href={collab.previewState()?.url ?? `/preview/`}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={`Open live preview (served at ${collab.previewState()?.url ?? "/preview/"})`}
+                      class="flex items-center gap-1 text-[10px] text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-1.5 py-0.5 rounded-full border border-emerald-500/30 transition-colors"
+                    >
+                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      preview
+                      <svg class="w-2 h-2" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                      </svg>
+                    </a>
+                  )}
+                </For>
+              </Show>
             </div>
             {/* Repo list caps at ~5 rows and scrolls internally when the
                 session links to many repos — keeps the queue's flex-1
