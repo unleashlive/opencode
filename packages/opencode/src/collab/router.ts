@@ -77,6 +77,57 @@ import { disposeAllInstances } from "@/project/instance-runtime"
 // megabyte payloads and bounds the SSE event size.
 const PROMPT_BODY_MAX_BYTES = 32 * 1024
 
+// ── Prompt image attachments ────────────────────────────────────────────────
+// Images uploaded in the iframe prompt ride alongside a prompt: iframe →
+// /prompt|/suggest → the queue → the native session as `file` parts, so the LLM
+// actually reads the image (jpg/png/webp/gif/pdf).  We do NOT persist them on
+// the suggestion DB row — multi-MB base64 would bloat every row and every SSE
+// broadcast — so they're held in-memory, keyed by suggestion id, between submit
+// and the queue executor's dispatch.  Lost only if the container restarts in
+// that window (rare); the text prompt still dispatches.
+type PromptAttachment = { mime: string; url: string; filename?: string }
+
+const PROMPT_ATTACHMENTS_MAX = 6
+const PROMPT_ATTACHMENT_BYTES_MAX = 12 * 1024 * 1024 // ~12 MB of data: URL per prompt
+const PROMPT_ATTACHMENT_MIMES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"])
+// Bounded so a flood of never-dispatched suggestions can't grow it unbounded.
+const PENDING_ATTACHMENTS_MAX_ENTRIES = 24
+const pendingAttachments = new Map<string, PromptAttachment[]>()
+
+/** Validate + clamp the `attachments` field of a /prompt|/suggest body.  Keeps
+ *  only small `data:` URLs of an allowed image/pdf type; drops everything else
+ *  (no remote URLs — avoids server-side fetch of attacker-supplied links). */
+function sanitizeAttachments(raw: unknown): PromptAttachment[] {
+  if (!Array.isArray(raw)) return []
+  const out: PromptAttachment[] = []
+  let totalBytes = 0
+  for (const item of raw) {
+    if (out.length >= PROMPT_ATTACHMENTS_MAX) break
+    if (!item || typeof item !== "object") continue
+    const mime = (item as { mime?: unknown }).mime
+    const url = (item as { url?: unknown }).url
+    const filename = (item as { filename?: unknown }).filename
+    if (typeof mime !== "string" || !PROMPT_ATTACHMENT_MIMES.has(mime)) continue
+    if (typeof url !== "string" || !url.startsWith("data:")) continue
+    totalBytes += url.length
+    if (totalBytes > PROMPT_ATTACHMENT_BYTES_MAX) break
+    out.push({ mime, url, filename: typeof filename === "string" ? filename.slice(0, 200) : undefined })
+  }
+  return out
+}
+
+/** Stash attachments for a suggestion until its queue executor dispatches them.
+ *  Evicts the oldest entry when at capacity (Map preserves insertion order). */
+function rememberAttachments(suggestionId: string, attachments: PromptAttachment[]): void {
+  if (attachments.length === 0) return
+  while (pendingAttachments.size >= PENDING_ATTACHMENTS_MAX_ENTRIES) {
+    const oldest = pendingAttachments.keys().next().value
+    if (oldest === undefined) break
+    pendingAttachments.delete(oldest)
+  }
+  pendingAttachments.set(suggestionId, attachments)
+}
+
 /**
  * Read TCP ports the container is currently LISTENING on, by parsing
  * /proc/net/tcp + /proc/net/tcp6.  Filters out:
@@ -201,8 +252,17 @@ function registerQueueExecutor(collabSessionId: string): void {
       )
     }
 
+    const attachments = pendingAttachments.get(suggestion.id)
     try {
-      await executePromptOnNativeSession(cs, suggestion.content, workspacePath, suggestion.model, suggestion.agent, suggestion.variant)
+      await executePromptOnNativeSession(
+        cs,
+        suggestion.content,
+        workspacePath,
+        suggestion.model,
+        suggestion.agent,
+        suggestion.variant,
+        attachments,
+      )
     } catch (err) {
       // Leave row as `in_flight` so a future container restart picks it up
       // again via the boot sweep.  We deliberately do NOT flip back to
@@ -213,6 +273,9 @@ function registerQueueExecutor(collabSessionId: string): void {
         err,
       )
       throw err // re-throw so Queue's .catch records the failure (lock still released in finally)
+    } finally {
+      // One-shot: dispatch was attempted, drop the in-memory attachments.
+      pendingAttachments.delete(suggestion.id)
     }
     // Phase 2: terminal "submitted" — only on success.
     collabDb.updateSuggestionStatus(suggestion.id, "submitted")
@@ -448,6 +511,7 @@ async function executePromptOnNativeSession(
   model?: string,
   agent?: string,
   variant?: string,
+  attachments?: PromptAttachment[],
 ): Promise<void> {
   const nativeSessionId = await ensureNativeSession(collabSession.id, workspacePath)
   if (!nativeSessionId) {
@@ -458,14 +522,27 @@ async function executePromptOnNativeSession(
   // Parse "providerID/modelID" string into the object shape prompt_async expects.
   const modelObj = model ? parseModelString(model) : undefined
 
-  console.log("[collab] sending prompt to native session:", nativeSessionId, { model, agent, variant })
+  // Build the message parts: the text prompt, plus any uploaded images as
+  // `file` parts (data: URLs).  prompt_async → the Anthropic provider turns
+  // file parts into image blocks, so Claude actually reads the jpg/png.
+  const promptParts: Array<Record<string, unknown>> = [{ type: "text", text: content }]
+  for (const a of attachments ?? []) {
+    promptParts.push({ type: "file", mime: a.mime, url: a.url, ...(a.filename ? { filename: a.filename } : {}) })
+  }
+
+  console.log("[collab] sending prompt to native session:", nativeSessionId, {
+    model,
+    agent,
+    variant,
+    attachments: attachments?.length ?? 0,
+  })
   const promptRes = await nativeFetch(
     `/session/${nativeSessionId}/prompt_async?directory=${encodeURIComponent(workspacePath)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        parts: [{ type: "text", text: content }],
+        parts: promptParts,
         ...(modelObj && { model: modelObj }),
         ...(agent && { agent }),
         ...(variant && { variant }),
@@ -1583,19 +1660,27 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
     // Rate limit: 60 prompts / minute / user (ADR-0008).  Body cap 32 KB.
     const rl = checkRateLimit(`prompt:${sess.githubId}`, 60, 60 * 1000)
     if (!rl.ok) return rateLimitedResponse(rl.retryAfter)
-    const body = (await req.json()) as { content: string; model?: string; agent?: string; variant?: string }
+    const body = (await req.json()) as {
+      content: string
+      model?: string
+      agent?: string
+      variant?: string
+      attachments?: unknown
+    }
     if (typeof body.content === "string" && body.content.length > PROMPT_BODY_MAX_BYTES) {
       return json({ error: `Prompt too long (max ${PROMPT_BODY_MAX_BYTES} bytes)` }, 413)
     }
     const promptModel = typeof body.model === "string" ? body.model : undefined
     const promptAgent = typeof body.agent === "string" ? body.agent : undefined
     const promptVariant = typeof body.variant === "string" ? body.variant : undefined
+    const promptAttachments = sanitizeAttachments(body.attachments)
     ensureQueueRegistered(sessionId)
 
     if (collabSession.queueMode === "fifo" && caller.role === "driver") {
       // Direct dispatch — bypass approval.  Executor handles the rest:
       // marks "submitted", broadcasts collab:prompt_submitted, dispatches.
       const suggestion = Queue.enqueue(sessionId, body.content, sess.githubId, sess.githubLogin, promptModel, promptAgent, promptVariant)
+      rememberAttachments(suggestion.id, promptAttachments)
       // Mention broadcasts even though the suggestion itself won't appear
       // in the pending queue — Bob still gets a ping if @bob was mentioned.
       for (const event of mentionsToEvents({
@@ -1611,6 +1696,7 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
 
     // Pending — needs Driver approval (FIFO contributor) or pool resolve (Vote).
     const suggestion = Queue.submitToPool(sessionId, body.content, sess.githubId, sess.githubLogin, promptModel, promptAgent, promptVariant)
+    rememberAttachments(suggestion.id, promptAttachments)
     broadcastSse(sessionId, { type: "collab:prompt_suggestion", suggestion })
     broadcastSse(sessionId, { type: "collab:queue_update", queue: collabDb.getPendingPool(sessionId) })
     for (const event of mentionsToEvents({
@@ -1630,14 +1716,22 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
     // Rate limit: 60 suggestions / minute / user (ADR-0008).  Body cap 32 KB.
     const rl = checkRateLimit(`suggest:${sess.githubId}`, 60, 60 * 1000)
     if (!rl.ok) return rateLimitedResponse(rl.retryAfter)
-    const body = (await req.json()) as { content: string; model?: string; agent?: string; variant?: string }
+    const body = (await req.json()) as {
+      content: string
+      model?: string
+      agent?: string
+      variant?: string
+      attachments?: unknown
+    }
     if (typeof body.content === "string" && body.content.length > PROMPT_BODY_MAX_BYTES) {
       return json({ error: `Suggestion too long (max ${PROMPT_BODY_MAX_BYTES} bytes)` }, 413)
     }
     const suggestModel = typeof body.model === "string" ? body.model : undefined
     const suggestAgent = typeof body.agent === "string" ? body.agent : undefined
     const suggestVariant = typeof body.variant === "string" ? body.variant : undefined
+    const suggestAttachments = sanitizeAttachments(body.attachments)
     const suggestion = Queue.submitToPool(sessionId, body.content, sess.githubId, sess.githubLogin, suggestModel, suggestAgent, suggestVariant)
+    rememberAttachments(suggestion.id, suggestAttachments)
     broadcastSse(sessionId, { type: "collab:prompt_suggestion", suggestion })
     for (const event of mentionsToEvents({
       text: body.content,

@@ -1173,12 +1173,22 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     // The stop affordance is preserved by the empty-editor → working path.
     event.preventDefault?.()
 
-    if (!text) {
+    // An image-only prompt (attachment, no text) is still a real submit — only
+    // a TRULY empty editor (no text AND no images) is stop / no-op.
+    if (!text && imageAttachments().length === 0) {
       if (working()) return nativeHandleSubmit(event)
       return
     }
     if (!editor) return
 
+    // Snapshot any uploaded images BEFORE clearing the editor.  The collab
+    // server forwards these to the native session as `file` parts so the LLM
+    // actually sees the image (jpg/png/…).  `dataUrl` is a base64 data: URL.
+    const attachments = imageAttachments().map((a) => ({
+      mime: a.mime,
+      url: a.dataUrl,
+      filename: a.filename,
+    }))
     try {
       const currentModel = local.model.current()
       const currentAgent = local.agent.current()
@@ -1193,6 +1203,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           model: modelStr,
           agent: currentAgent?.name,
           variant: currentVariant,
+          attachments,
         },
         window.location.origin,
       )
@@ -1200,7 +1211,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       // postMessage shouldn't ever throw on same-origin; ignore if it does.
     }
 
-    // Clear the editor + history bookkeeping so the user can type the next.
+    // Clear the editor + the attached images + history bookkeeping so the next
+    // prompt starts from a clean slate.
+    for (const a of imageAttachments()) removeAttachment(a.id)
     editor.innerHTML = ""
     // addToHistory expects a Prompt (ContentPart[]), not the raw extracted
     // string.  Without this wrap the keydown-Up recall path hits

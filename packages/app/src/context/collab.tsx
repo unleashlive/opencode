@@ -34,8 +34,8 @@ interface CollabContextValue {
   postNote: (content: string) => Promise<void>
 
   // Actions
-  submitPrompt: (content: string, model?: string, agent?: string, variant?: string) => Promise<void>
-  suggestPrompt: (content: string, model?: string, agent?: string, variant?: string) => Promise<void>
+  submitPrompt: (content: string, model?: string, agent?: string, variant?: string, attachments?: PromptAttachment[]) => Promise<void>
+  suggestPrompt: (content: string, model?: string, agent?: string, variant?: string, attachments?: PromptAttachment[]) => Promise<void>
   approvesuggestion: (suggestionId: string) => Promise<void>
   rejectSuggestion: (suggestionId: string) => Promise<void>
   castVote: (suggestionId: string) => Promise<void>
@@ -75,6 +75,14 @@ interface CollabContextValue {
   stopPreview: () => Promise<void>
   /** Driver-only: stop + relaunch with the same config. */
   restartPreview: () => Promise<void>
+}
+
+/** An image/file attached to a collab prompt, mirrored from the native
+ *  prompt-input's image parts.  `url` is a `data:` URL (base64). */
+export interface PromptAttachment {
+  mime: string
+  url: string
+  filename?: string
 }
 
 /** Mirrors PreviewStateSnapshot in collab/preview-launcher.ts. */
@@ -593,11 +601,11 @@ export function CollabProvider(props: CollabProviderProps) {
       return me?.role ?? "viewer"
     },
 
-    async submitPrompt(content, model, agent, variant) {
-      await api("/prompt", "POST", { content, model, agent, variant })
+    async submitPrompt(content, model, agent, variant, attachments) {
+      await api("/prompt", "POST", { content, model, agent, variant, attachments })
     },
-    async suggestPrompt(content, model, agent, variant) {
-      await api("/suggest", "POST", { content, model, agent, variant })
+    async suggestPrompt(content, model, agent, variant, attachments) {
+      await api("/suggest", "POST", { content, model, agent, variant, attachments })
     },
     async approvesuggestion(suggestionId) {
       await api(`/approve/${suggestionId}`, "POST")

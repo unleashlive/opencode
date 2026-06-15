@@ -525,7 +525,11 @@ function CollabSessionInner(props: { me: Me }) {
       // Prompt submission: route through the collab queue.
       if (data.type === "opencode:collab-prompt-submit") {
         const content = typeof data.content === "string" ? data.content.trim() : ""
-        if (!content) return
+        // Image attachments uploaded in the iframe prompt — forwarded so the
+        // LLM receives them as file parts (collab/router.ts builds the parts).
+        const attachments = Array.isArray(data.attachments) ? data.attachments : undefined
+        // Allow an image-only prompt (no text), but never a fully empty submit.
+        if (!content && (!attachments || attachments.length === 0)) return
         if (myRole() === "viewer") {
           setSubmitError("Viewers cannot send prompts.")
           return
@@ -534,7 +538,7 @@ function CollabSessionInner(props: { me: Me }) {
         const model = typeof data.model === "string" ? data.model : undefined
         const agent = typeof data.agent === "string" ? data.agent : undefined
         const variant = typeof data.variant === "string" ? data.variant : undefined
-        collab.submitPrompt(content, model, agent, variant).catch((err) => {
+        collab.submitPrompt(content, model, agent, variant, attachments).catch((err) => {
           setSubmitError(err instanceof Error ? err.message : String(err))
         })
         return
