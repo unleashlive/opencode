@@ -10,6 +10,7 @@
 import { createResource, For, Show, createMemo } from "solid-js"
 import type { CollabSession } from "@opencode-ai/collab"
 import { collabEmbedSessionId, navigateTopToCollabSession } from "@/utils/collab-embed"
+import { PILL_BRAND, ROW_ACTIVE } from "./ui"
 
 interface Me {
   githubId: number
@@ -72,7 +73,7 @@ export function CollabEmbedSidebar() {
               top.location.href = "/collab/new"
             }}
             title="Back to your collab sessions"
-            class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30 uppercase tracking-wider hover:bg-blue-500/30 hover:text-blue-300 transition-colors"
+            class={PILL_BRAND}
           >
             Collab
           </button>
@@ -124,7 +125,7 @@ export function CollabEmbedSidebar() {
                 }}
                 classList={{
                   "relative w-full text-left px-4 py-2.5 transition-colors group border-b border-zinc-800/40 last:border-0 cursor-pointer": true,
-                  "bg-blue-500/10 border-l-2 border-l-blue-500": isActive(),
+                  [ROW_ACTIVE]: isActive(),
                   "hover:bg-zinc-800/60": !isActive(),
                 }}
               >

@@ -11,6 +11,7 @@
 import { createSignal, createResource, onMount, For, Show } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import type { CollabSession } from "@opencode-ai/collab"
+import { BTN_PRIMARY, BTN_SECONDARY, PILL_BRAND } from "@/components/collab/ui"
 
 interface OrgRepo {
   full_name: string
@@ -207,7 +208,7 @@ export default function NewCollabSession() {
                 e.preventDefault()
                 window.location.href = "/collab/new"
               }}
-              class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30 uppercase tracking-wider hover:bg-blue-500/30 hover:text-blue-300 transition-colors"
+              class={PILL_BRAND}
             >
               Collab
             </a>
@@ -528,7 +529,7 @@ export default function NewCollabSession() {
               <button
                 type="submit"
                 disabled={submitting() || !name().trim()}
-                class="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-500 disabled:shadow-none disabled:ring-0 text-white font-semibold py-3 rounded-lg text-sm transition-all shadow-lg shadow-blue-600/30 hover:shadow-xl hover:shadow-blue-500/40 ring-1 ring-blue-500/40 hover:ring-blue-400/60 focus:outline-none focus:ring-2 focus:ring-blue-400/80"
+                class={`${BTN_PRIMARY} w-full py-3 text-sm`}
               >
                 {submitting() ? "Creating…" : "Create Collab Session"}
               </button>
@@ -568,7 +569,7 @@ export default function NewCollabSession() {
                   type="button"
                   onClick={() => void acceptSuggestedBranch()}
                   disabled={submitting()}
-                  class="flex-1 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white transition-colors"
+                  class={`${BTN_PRIMARY} flex-1 py-2 text-sm`}
                 >
                   {submitting() ? "Creating…" : "Use suggested"}
                 </button>
@@ -578,7 +579,7 @@ export default function NewCollabSession() {
                     setBranch(conflict().proposed)
                     setBranchConflict(null)
                   }}
-                  class="flex-1 py-2 rounded-lg text-sm font-medium bg-background-strong hover:bg-background-stronger text-text-strong transition-colors"
+                  class={`${BTN_SECONDARY} flex-1 py-2 text-sm`}
                 >
                   Edit branch name
                 </button>

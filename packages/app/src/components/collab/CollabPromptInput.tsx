@@ -9,6 +9,7 @@
 import { createSignal, Show } from "solid-js"
 import { useCollab } from "@/context/collab"
 import type { CollabRole } from "@opencode-ai/collab"
+import { BTN_PRIMARY } from "./ui"
 
 export function CollabPromptInput() {
   const collab = useCollab()
@@ -87,11 +88,11 @@ export function CollabPromptInput() {
         <button
           type="submit"
           disabled={sending() || !value().trim()}
-          class={`px-4 py-2 rounded-lg text-sm font-medium transition-colors self-end ${
+          class={
             isDriver()
-              ? "bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 text-white"
-              : "bg-yellow-700 hover:bg-yellow-600 disabled:bg-zinc-700 text-zinc-100"
-          } disabled:text-zinc-500`}
+              ? `${BTN_PRIMARY} px-4 py-2 text-sm self-end`
+              : "px-4 py-2 rounded-lg text-sm font-medium transition-colors self-end bg-yellow-700 hover:bg-yellow-600 disabled:bg-zinc-700 text-zinc-100 disabled:text-zinc-500"
+          }
         >
           {sending() ? "…" : isDriver() ? "Send" : "Suggest"}
         </button>
