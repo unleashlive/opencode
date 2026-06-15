@@ -47,30 +47,41 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          # Fetch just the base commit and check it out in a separate worktree,
-          # reusing the already-installed node_modules (type defs) via symlink
-          # so we don't pay a second multi-minute `bun install`.  Base + head
-          # share a lockfile in the overwhelming majority of PRs; if a PR
-          # changes dependencies, the base typecheck runs against head's
-          # node_modules — worst case a spurious new/missing signature the
-          # author can see in the log.
+          # Collect the base baseline by checking BASE out IN PLACE in this same
+          # working tree, then running the collection script here — NOT in a
+          # detached `git worktree` with symlinked node_modules.  The worktree
+          # approach (the original design) made `bun turbo typecheck` fast-fail
+          # on the base: a linked worktree has a `.git` *file* (not dir) and a
+          # symlinked node_modules, and turbo/tsgo produced zero task output
+          # there, so the base baseline came back empty and the ratchet flagged
+          # every real head error as "new".  Running in place reuses the exact
+          # node_modules + tree head just typechecked against, so turbo behaves
+          # identically for base and head.
+          #
+          # Copy head's (this PR's) collection script to a temp path BEFORE the
+          # checkout, so we always run the up-to-date collector even when BASE
+          # predates a fix to it.
+          cp .github/scripts/collect-type-errors.sh "$RUNNER_TEMP/collect.sh"
           git fetch --no-tags --depth=1 origin "$BASE_SHA"
-          git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
-          ln -s "$GITHUB_WORKSPACE/node_modules" "$RUNNER_TEMP/base/node_modules"
-          for d in packages/*; do
-            if [ -d "$GITHUB_WORKSPACE/$d/node_modules" ]; then
-              ln -s "$GITHUB_WORKSPACE/$d/node_modules" "$RUNNER_TEMP/base/$d/node_modules" || true
-            fi
-          done
-          ( cd "$RUNNER_TEMP/base" && bash "$GITHUB_WORKSPACE/.github/scripts/collect-type-errors.sh" ) > "$RUNNER_TEMP/base.txt"
+          git checkout --detach --force "$BASE_SHA"
+          bash "$RUNNER_TEMP/collect.sh" > "$RUNNER_TEMP/base.txt"
 
       - name: Fail on NEW type errors
         if: github.event_name == 'pull_request'
         run: |
           set -uo pipefail
-          base_n=$(wc -l < "$RUNNER_TEMP/base.txt" | tr -d ' ')
-          head_n=$(wc -l < "$RUNNER_TEMP/head.txt" | tr -d ' ')
+          base_n=$(grep -c . "$RUNNER_TEMP/base.txt" || true)
+          head_n=$(grep -c . "$RUNNER_TEMP/head.txt" || true)
           echo "type-error signatures — base: ${base_n}, head: ${head_n}"
+          # Sanity gate: this fork carries ~20 known baseline TS errors, so the
+          # base set is never legitimately empty while head has errors.  A base
+          # count of 0 with a non-empty head almost always means the base
+          # collection didn't actually run (tooling/setup failure) — fail with a
+          # clear diagnostic instead of misreporting every head error as "new".
+          if [ "$base_n" -eq 0 ] && [ "$head_n" -gt 0 ]; then
+            echo "::error::Base produced 0 type-error signatures while head has ${head_n}. The base typecheck almost certainly failed to run (not a real diff) — inspect the 'Collect type errors — base' step log."
+            exit 1
+          fi
           new="$(comm -13 <(sort -u "$RUNNER_TEMP/base.txt") <(sort -u "$RUNNER_TEMP/head.txt") || true)"
           if [ -n "$new" ]; then
             echo "::error::This PR introduces NEW TypeScript errors not present on the base branch:"
