@@ -2142,8 +2142,21 @@ function handleSse(
         try {
           controllerRef.enqueue(encoder.encode(`: keepalive\n\n`))
         } catch {
-          // Stream closed under us — clean up; cancel() will run shortly.
-          if (heartbeat) clearInterval(heartbeat)
+          // The keepalive write failed → the client is gone.  Behind the ALB a
+          // dropped SSE socket frequently does NOT fire the stream's cancel()
+          // callback, so the previous "clear the heartbeat and trust cancel()
+          // to run shortly" leaked this connection's registration until the 2 h
+          // idle recycle — and clearing only the heartbeat killed the recycle
+          // too, pinning the slot until process restart.  Repeated, that fills
+          // MAX_SSE_PER_SESSION and 429s every new tab for the session.  Tear
+          // down NOW (teardown() unregisters + clears the heartbeat; idempotent
+          // via `tornDown`) so the slot frees on the next 20 s tick, not in 2 h.
+          teardown()
+          try {
+            controllerRef.close()
+          } catch {
+            // already closed — fine
+          }
         }
       }, 20_000)
     },
