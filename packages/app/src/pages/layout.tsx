@@ -112,6 +112,30 @@ export default function Layout(props: ParentProps) {
   let dialogDead = false
 
   const params = useParams()
+
+  // Collab embed: when the iframe's active native session changes — e.g. via
+  // opencode's lower-right "go to session" cross-session popup — tell the
+  // parent collab page so it can swap to the matching collab session and
+  // refresh the participant sidebar.  `params.id` is the native session id;
+  // `defer` skips the initial mount (the parent is already on the right
+  // session then) and prevents an echo loop after the parent navigates.
+  if (isCollabEmbed()) {
+    createEffect(
+      on(
+        () => params.id,
+        (sessionId) => {
+          if (!sessionId) return
+          try {
+            window.parent.postMessage({ type: "opencode:collab-session-changed", sessionId }, window.location.origin)
+          } catch {
+            /* same-origin postMessage shouldn't throw; ignore if it does */
+          }
+        },
+        { defer: true },
+      ),
+    )
+  }
+
   const globalSDK = useGlobalSDK()
   const globalSync = useGlobalSync()
   const layout = useLayout()

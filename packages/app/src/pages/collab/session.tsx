@@ -547,6 +547,35 @@ function CollabSessionInner(props: { me: Me }) {
         void collab.setTyping(Boolean(data.typing))
         return
       }
+
+      // Native session switched inside the iframe (e.g. opencode's
+      // cross-session "go to session" popup).  Swap the whole collab page —
+      // including the participant sidebar — to the collab session that owns
+      // that native session, so the left panel matches the conversation shown
+      // on the right.
+      if (data.type === "opencode:collab-session-changed") {
+        const nativeId = typeof data.sessionId === "string" ? data.sessionId : ""
+        if (!nativeId) return
+        // Already showing this native session → nothing to do (also breaks the
+        // post-navigation echo: the freshly-loaded iframe re-announces its id).
+        if (nativeId === collab.session()?.sessionId) return
+        void (async () => {
+          try {
+            const res = await fetch("/collab/session")
+            if (!res.ok) return
+            const list = (await res.json()) as Array<{ id: string; sessionId?: string | null }>
+            const target = list.find((s) => s.sessionId === nativeId)
+            if (target && target.id !== collab.session()?.id) {
+              // Full page nav so CollabProvider remounts with the new session
+              // (fresh participants + SSE) — same pattern as the Collab pill.
+              window.location.href = `/collab/${target.id}`
+            }
+          } catch {
+            /* best-effort — leave the page as-is if the lookup fails */
+          }
+        })()
+        return
+      }
     }
     window.addEventListener("message", onIframeMessage)
     onCleanup(() => window.removeEventListener("message", onIframeMessage))
