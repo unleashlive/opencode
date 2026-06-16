@@ -311,9 +311,11 @@ const SIGN_IN_LANDING_HTML = `<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>unleashlive collab — sign in</title>
-  <link rel="icon" type="image/svg+xml" href="/favicon-v3.svg" />
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-v3.png" />
+  <title>Unleash Collab — sign in</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+  <link rel="shortcut icon" href="/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/collab.webmanifest" />
   <meta name="theme-color" content="#09090b" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -337,7 +339,7 @@ const SIGN_IN_LANDING_HTML = `<!doctype html>
 <body>
   <div class="page">
     <div class="card">
-      <h1>unleashlive collab</h1>
+      <h1>Unleash Collab</h1>
       <p>Sign in with GitHub to create or join a collaborative coding session.</p>
       <a class="btn" href="/collab/auth/github?next=/collab/new">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.11.83-.26.83-.58v-2c-3.34.73-4.04-1.61-4.04-1.61-.54-1.4-1.34-1.77-1.34-1.77-1.1-.74.08-.72.08-.72 1.21.09 1.85 1.25 1.85 1.25 1.08 1.84 2.83 1.31 3.52 1 .11-.78.42-1.31.76-1.61-2.66-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.31-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.45 11.45 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.25 2.87.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.49 5.92.43.37.81 1.1.81 2.22v3.29c0 .32.22.7.83.58A12 12 0 0 0 12 .3"/></svg>
