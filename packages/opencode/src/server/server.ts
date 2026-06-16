@@ -313,6 +313,13 @@ const SIGN_IN_LANDING_HTML = `<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>unleashlive collab — sign in</title>
   <link rel="icon" type="image/svg+xml" href="/favicon-v3.svg" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon-v3.png" />
+  <link rel="manifest" href="/collab.webmanifest" />
+  <meta name="theme-color" content="#09090b" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Collab" />
   <style>
     :root { color-scheme: dark; }
     html, body { margin: 0; padding: 0; height: 100%; background: #0a0a0a; color: #e4e4e7; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }

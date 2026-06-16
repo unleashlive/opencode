@@ -189,10 +189,11 @@ export default function NewCollabSession() {
   }
 
   return (
-    <div class="h-screen bg-zinc-950 text-zinc-100 flex overflow-hidden">
+    <div class="h-dvh bg-zinc-950 text-zinc-100 flex flex-col md:flex-row overflow-hidden">
 
-      {/* ── LEFT: Rejoin Session sidebar (1/4) ──────────────────────────── */}
-      <div class="w-72 flex-shrink-0 flex flex-col border-r border-zinc-800 bg-zinc-900/40">
+      {/* ── LEFT: Rejoin Session sidebar (1/4 on desktop; a capped, scrollable
+            section below the form on mobile via `order`) ──────────────────── */}
+      <div class="w-full md:w-72 flex-shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-zinc-800 bg-zinc-900/40 max-h-[40vh] md:max-h-none">
 
         {/* Sidebar header */}
         <div class="px-4 py-4 border-b border-zinc-800 flex-shrink-0">
@@ -343,9 +344,10 @@ export default function NewCollabSession() {
         </div>
       </div>
 
-      {/* ── RIGHT: New Session form (3/4) ────────────────────────────────── */}
-      <div class="flex-1 overflow-y-auto">
-        <div class="w-full max-w-lg mx-auto px-8 py-12">
+      {/* ── RIGHT: New Session form (3/4 on desktop; first + full-width on
+            mobile so "Create" is at the top) ───────────────────────────────── */}
+      <div class="flex-1 overflow-y-auto order-first md:order-none">
+        <div class="w-full max-w-lg mx-auto px-4 py-8 md:px-8 md:py-12">
           <div class="mb-8">
             <h1 class="text-2xl font-semibold mb-1">New Collab Session</h1>
             <p class="text-sm text-zinc-400">

@@ -496,6 +496,9 @@ function CollabSessionInner(props: { me: Me }) {
   const [showInvite, setShowInvite] = createSignal(false)
   const [queueOpen, setQueueOpen] = createSignal(true)
   const [submitError, setSubmitError] = createSignal<string | null>(null)
+  // Mobile-only: which pane the phone-width bottom toggle shows.  Desktop
+  // (md+) always shows both panel + editor side-by-side and ignores this.
+  const [mobileView, setMobileView] = createSignal<"panel" | "editor">("panel")
 
   const myParticipant = () =>
     collab.session()?.participants.find((p) => p.githubId === props.me.githubId)
@@ -586,10 +589,17 @@ function CollabSessionInner(props: { me: Me }) {
   })
 
   return (
-    <div class="flex h-screen bg-zinc-950 text-zinc-100 overflow-hidden font-sans">
+    <div class="flex flex-col md:flex-row h-dvh bg-zinc-950 text-zinc-100 overflow-hidden font-sans">
 
-      {/* ── LEFT: Collab panel (1/4) ─────────────────────────────────────── */}
-      <div class="w-72 flex-shrink-0 flex flex-col border-r border-zinc-800 bg-zinc-900/40">
+      {/* ── LEFT: Collab panel ───────────────────────────────────────────────
+          Desktop (md+): fixed 288px column, always visible.
+          Mobile: full-width and fills the height above the bottom toggle bar;
+          shown only when mobileView()==="panel".  `md:flex` always wins at md+
+          so the base flex/hidden from classList is mobile-only. */}
+      <div
+        class="w-full md:w-72 flex-col flex-1 md:flex-none border-b md:border-b-0 md:border-r border-zinc-800 bg-zinc-900/40 md:flex min-h-0"
+        classList={{ flex: mobileView() === "panel", hidden: mobileView() === "editor" }}
+      >
 
         {/* Header */}
         <div class="px-4 py-3 border-b border-zinc-800 flex items-center justify-between flex-shrink-0">
@@ -855,8 +865,13 @@ function CollabSessionInner(props: { me: Me }) {
         </Show>
       </div>
 
-      {/* ── RIGHT: Conversation (3/4) — opencode session iframe ─────────── */}
-      <div class="flex-1 flex flex-col min-w-0 relative">
+      {/* ── RIGHT: Conversation — opencode session iframe ────────────────────
+          Desktop: always visible beside the panel.  Mobile: shown only when
+          mobileView()==="editor" (md:flex wins at md+, so classLst is mobile). */}
+      <div
+        class="flex-1 flex-col min-w-0 relative md:flex"
+        classList={{ flex: mobileView() === "editor", hidden: mobileView() === "panel" }}
+      >
 
         {/* Top-right chrome — connection status only.  The preview-port
             pills now live next to the "Repos" title in the left panel. */}
@@ -945,6 +960,38 @@ function CollabSessionInner(props: { me: Me }) {
       <Show when={showInvite()}>
         <InviteDialog onClose={() => setShowInvite(false)} />
       </Show>
+
+      {/* Mobile-only bottom toggle — switch between the collab panel and the
+          editor iframe.  Hidden at md+, where both panes show side-by-side. */}
+      <div class="md:hidden flex-shrink-0 flex border-t border-zinc-800 bg-zinc-950">
+        <button
+          type="button"
+          onClick={() => setMobileView("panel")}
+          class="flex-1 py-3 text-xs font-medium transition-colors"
+          classList={{
+            "text-white bg-zinc-800/60": mobileView() === "panel",
+            "text-zinc-500": mobileView() !== "panel",
+          }}
+        >
+          <span class="relative inline-flex items-center gap-1.5">
+            Session
+            <Show when={collab.unreadMentions() > 0}>
+              <span class="w-1.5 h-1.5 rounded-full" style={{ "background-color": "#ef4444" }} />
+            </Show>
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileView("editor")}
+          class="flex-1 py-3 text-xs font-medium transition-colors border-l border-zinc-800"
+          classList={{
+            "text-white bg-zinc-800/60": mobileView() === "editor",
+            "text-zinc-500": mobileView() !== "editor",
+          }}
+        >
+          Editor
+        </button>
+      </div>
     </div>
   )
 }
