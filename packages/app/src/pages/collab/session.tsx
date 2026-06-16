@@ -874,7 +874,17 @@ function CollabSessionInner(props: { me: Me }) {
             (no URL-crafting around the gate). */}
         <Show
           when={(collab.session()?.repos.length ?? 0) > 0}
-          fallback={<EmptyReposPanel />}
+          fallback={
+            // A null session = not loaded yet (initial fetch or a reconnect in
+            // flight, e.g. during a deploy or an SSE drop) — show the
+            // preparing/connecting state, NOT the scary "No repositories
+            // linked" panel.  Only a LOADED session with genuinely zero repos
+            // gets EmptyReposPanel.  Without this guard a transient blip makes a
+            // session that HAS a repo look mis-configured.
+            <Show when={collab.session()} fallback={<PreparingWorkspacePanel />}>
+              <EmptyReposPanel />
+            </Show>
+          }
         >
 
         {/* Triple gate before the iframe mounts:

@@ -711,11 +711,14 @@ function parseCookies(header: string): Record<string, string> {
 // ── SSE connection store ────────────────────────────────────────────────────────
 
 /** S4 — bound concurrent SSE streams per session.  Realistic max is 2-3
- *  users × 2-3 tabs; 8 leaves comfortable headroom while capping the
+ *  users × 2-3 tabs; 16 leaves generous headroom (raised from 8 after a
+ *  leak-driven lockout pinned a session at the cap) while still capping the
  *  file-descriptor + per-stream-closure footprint a runaway client (many
  *  tabs, or a reconnect storm) could otherwise pile onto the single-replica
- *  task.  The 9th concurrent connection for a session gets a 429. */
-const MAX_SSE_PER_SESSION = 8
+ *  task.  The keepalive-failure teardown frees a dropped client's slot within
+ *  ~20 s, so legitimate use stays well under this.  The 17th concurrent
+ *  connection for a session gets a 429. */
+const MAX_SSE_PER_SESSION = 16
 
 /** S4 — recycle an SSE stream that has gone this long without a single real
  *  event (keepalives don't count).  A quiet session's tab is closed from the

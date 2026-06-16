@@ -167,7 +167,7 @@ export function CollabProvider(props: CollabProviderProps) {
     })
   }
 
-  async function fetchSession() {
+  async function fetchSession(attempt = 0) {
     try {
       const res = await fetch(`/collab/session/${props.collabSessionId}`)
       if (res.ok) {
@@ -181,8 +181,24 @@ export function CollabProvider(props: CollabProviderProps) {
         if (workspacePath) {
           setNativeSessionDirectory(workspacePath)
         }
+        return
       }
-    } catch {}
+      // non-2xx — fall through to the retry below
+    } catch {
+      // network/abort — fall through to the retry below
+    }
+    // The session GET failed (a deploy restart, a brief network blip, an
+    // SSE-reconnect race) and we still have NO session loaded.  Previously
+    // this silently gave up, so the page stranded on the loading / "no repos"
+    // panel and never advanced to the iframe — the SSE-driven refetch only
+    // re-runs if the SSE stream itself manages to connect.  Retry the GET with
+    // capped exponential backoff until the session loads (repos + workspace);
+    // once `session()` is set, SSE keeps it fresh and we stop retrying.
+    if (session()) return
+    const delay = Math.min(1000 * 2 ** attempt, 8000)
+    setTimeout(() => {
+      if (!session()) void fetchSession(attempt + 1)
+    }, delay)
   }
 
   // Open SSE stream
