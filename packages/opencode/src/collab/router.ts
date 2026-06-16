@@ -728,20 +728,30 @@ const MAX_SSE_PER_SESSION = 16
  *  background tabs can't hold a stream (and its heartbeat timer) for days. */
 const SSE_IDLE_DISCONNECT_MS = 2 * 60 * 60 * 1000
 
-const sseClients = new Map<string, Set<(e: CollabEvent) => void>>()
+/** A live SSE stream.  `send` pushes an event to the client; `close` tears the
+ *  stream down — used to EVICT the stalest connection when a session is at its
+ *  concurrency cap (see handleSse) so a fresh page load always gets a slot. */
+type SseConn = { send: (e: CollabEvent) => void; close: () => void }
 
-function registerSse(collabSessionId: string, send: (e: CollabEvent) => void): () => void {
+const sseClients = new Map<string, Set<SseConn>>()
+
+function registerSse(collabSessionId: string, conn: SseConn): () => void {
   if (!sseClients.has(collabSessionId)) sseClients.set(collabSessionId, new Set())
-  sseClients.get(collabSessionId)!.add(send)
-  return () => sseClients.get(collabSessionId)?.delete(send)
+  sseClients.get(collabSessionId)!.add(conn)
+  return () => sseClients.get(collabSessionId)?.delete(conn)
 }
 
 export function broadcastSse(collabSessionId: string, event: CollabEvent) {
-  sseClients.get(collabSessionId)?.forEach((send) => {
+  sseClients.get(collabSessionId)?.forEach((conn) => {
     try {
-      send(event)
+      conn.send(event)
     } catch {
-      sseClients.get(collabSessionId)?.delete(send)
+      // Write failed → the client is gone.  Drop it AND close its stream so
+      // the slot is reclaimed (don't wait for the keepalive tick / idle sweep).
+      sseClients.get(collabSessionId)?.delete(conn)
+      try {
+        conn.close()
+      } catch {}
     }
   })
 }
@@ -1967,22 +1977,30 @@ function handleSse(
   collabSessionId: string,
   sess: { githubId: number; githubLogin: string },
 ): Response {
-  // S4 — refuse a new stream once this session already has the max
-  // concurrent connections.  The SPA surfaces the 429 as a "too many open
-  // tabs" hint; closing another tab frees a slot.  Counting the registered
-  // set is sufficient — a brief under-count during the connect window (the
-  // send callback registers inside stream.start(), a tick later) can only
-  // let through a connection or two beyond the cap under a true thundering
-  // herd, which is harmless.
-  const existing = sseClients.get(collabSessionId)?.size ?? 0
-  if (existing >= MAX_SSE_PER_SESSION) {
-    console.warn(
-      `[collab] SSE connection cap hit for session=${collabSessionId} (${existing}/${MAX_SSE_PER_SESSION}) — rejecting`,
-    )
-    return new Response(
-      `Too many open connections for this session (max ${MAX_SSE_PER_SESSION}). Close another tab and retry.`,
-      { status: 429, headers: { "content-type": "text/plain; charset=utf-8", "retry-after": "5" } },
-    )
+  // S4 — bound concurrent SSE streams per session, but EVICT the stalest
+  // stream(s) when at the cap rather than REJECTING the new one.  Why: behind
+  // the ALB a backgrounded tab's stream stays writable, so the keepalive-
+  // failure teardown never fires, and a session that keeps emitting events
+  // keeps resetting the idle-recycle timer — those zombie slots used to pin a
+  // session at the cap until a redeploy, so a plain reload 429'd forever
+  // ("Reconnecting…", with no way back short of a restart).  Evicting the
+  // oldest connection guarantees a fresh load always gets a slot; in the
+  // common single-user case the evicted one IS the abandoned tab.  Set
+  // iteration is insertion-ordered, so the first entry is the oldest.
+  {
+    const set = sseClients.get(collabSessionId)
+    let guard = 0
+    while (set && set.size >= MAX_SSE_PER_SESSION && guard++ < MAX_SSE_PER_SESSION + 4) {
+      const oldest = set.values().next().value
+      if (!oldest) break
+      console.warn(
+        `[collab] SSE cap reached for session=${collabSessionId} (${set.size}/${MAX_SSE_PER_SESSION}) — evicting stalest stream`,
+      )
+      try {
+        oldest.close()
+      } catch {}
+      set.delete(oldest) // belt-and-suspenders: guarantee the loop makes progress
+    }
   }
 
   // We need to defer events until the ReadableStream's controller exists.
@@ -2065,6 +2083,17 @@ function handleSse(
     broadcastSse(collabSessionId, { type: "collab:participant_left", githubLogin: sess.githubLogin })
   }
 
+  // Force-close this stream from the server side — invoked by the cap-eviction
+  // path in handleSse to reclaim a stale slot.  teardown() is idempotent
+  // (tornDown guard) + unregisters; closing the controller ends the HTTP
+  // stream so the evicted client's EventSource sees it and reconnects fresh.
+  const close = () => {
+    teardown()
+    try {
+      controllerRef?.close()
+    } catch {}
+  }
+
   const stream = new ReadableStream({
     start(controller) {
       controllerRef = controller
@@ -2119,7 +2148,7 @@ function handleSse(
           send({ type: "collab:preview_started", state: previewState })
         }
       }
-      unregister = registerSse(collabSessionId, send)
+      unregister = registerSse(collabSessionId, { send, close })
 
       heartbeat = setInterval(() => {
         if (!controllerRef) return
