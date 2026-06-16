@@ -179,3 +179,12 @@ if (root instanceof HTMLElement) {
     root,
   )
 }
+
+// Register the PWA service worker (installability + standalone display only;
+// see public/sw.js — it never caches HTML / collab API / SSE).  PROD only so
+// it can't interfere with Vite HMR in dev.
+if (import.meta.env.PROD && typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {})
+  })
+}
