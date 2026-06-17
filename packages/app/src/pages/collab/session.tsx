@@ -16,6 +16,7 @@ import {
   createSignal,
   createResource,
   createEffect,
+  createMemo,
   onMount,
   onCleanup,
   For,
@@ -27,7 +28,7 @@ import { InviteDialog } from "@/components/collab/InviteDialog"
 import { TeamNoteComposer } from "@/components/collab/TeamNoteComposer"
 import { PreviewLauncher } from "@/components/collab/PreviewLauncher"
 import { base64Encode } from "@opencode-ai/core/util/encode"
-import type { CollabRole, Participant, PromptSuggestion } from "@opencode-ai/collab"
+import type { CollabRole, Participant, PromptSuggestion, RepoPrResult } from "@opencode-ai/collab"
 import { BTN_PRIMARY, BTN_SUCCESS, BTN_SECONDARY, PILL_BRAND } from "@/components/collab/ui"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -157,7 +158,7 @@ function ParticipantRow(props: {
 function OpenPrButton() {
   const collab = useCollab()
   const [busy, setBusy] = createSignal(false)
-  const [prUrl, setPrUrl] = createSignal<string | null>(null)
+  const [results, setResults] = createSignal<RepoPrResult[]>([])
   const [error, setError] = createSignal<string | null>(null)
   // Lock the button out for the rest of the page lifetime when the branch
   // has no commits yet.  The server-side wrap (github-pr.ts) returns a
@@ -181,10 +182,15 @@ function OpenPrButton() {
     setBusy(true)
     setError(null)
     try {
-      const { url } = await collab.openPullRequest()
-      setPrUrl(url)
-      // Auto-open the PR in a new tab for the Driver.
-      window.open(url, "_blank", "noreferrer")
+      const { results: r } = await collab.openPullRequest()
+      setResults(r)
+      const opened = r.filter((x) => x.status === "opened")
+      // Lock only when there were repos and every one had no commits — nothing
+      // to PR until the LLM commits.  A mix of opened/errored stays clickable.
+      if (r.length > 0 && r.every((x) => x.status === "skipped")) setLocked(true)
+      // Auto-open just the first opened PR (not one tab per repo).
+      const first = opened[0]
+      if (first && first.status === "opened") window.open(first.url, "_blank", "noreferrer")
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       setError(message)
@@ -225,16 +231,43 @@ function OpenPrButton() {
           Open Pull Request
         </Show>
       </button>
-      <Show when={prUrl()}>
-        <a
-          href={prUrl()!}
-          target="_blank"
-          rel="noreferrer"
-          class="block text-[11px] text-emerald-400 hover:text-emerald-300 truncate"
-          title={prUrl()!}
-        >
-          → {prUrl()}
-        </a>
+      <Show when={results().length > 0}>
+        <div class="space-y-1">
+          <For each={results()}>
+            {(r) => (
+              <Show
+                when={r.status === "opened"}
+                fallback={
+                  <Show
+                    when={r.status === "skipped"}
+                    fallback={
+                      <div
+                        class="text-[11px] text-red-400 bg-red-400/10 border border-red-400/20 rounded px-2 py-1"
+                        title={r.status === "error" ? r.error : undefined}
+                      >
+                        {r.repo.split("/")[1] ?? r.repo}: {r.status === "error" ? r.error : ""}
+                      </div>
+                    }
+                  >
+                    <div class="text-[11px] text-zinc-500 truncate" title={`${r.repo}: no changes on the collab branch`}>
+                      {r.repo.split("/")[1] ?? r.repo}: no changes
+                    </div>
+                  </Show>
+                }
+              >
+                <a
+                  href={r.status === "opened" ? r.url : "#"}
+                  target="_blank"
+                  rel="noreferrer"
+                  class="block text-[11px] text-emerald-400 hover:text-emerald-300 truncate"
+                  title={r.status === "opened" ? r.url : undefined}
+                >
+                  → {r.repo.split("/")[1] ?? r.repo}: {r.status === "opened" ? r.url : ""}
+                </a>
+              </Show>
+            )}
+          </For>
+        </div>
       </Show>
       <Show when={error()}>
         <div class="text-[11px] text-red-400 bg-red-400/10 border border-red-400/20 rounded px-2 py-1 whitespace-pre-wrap">
@@ -499,6 +532,8 @@ function CollabSessionInner(props: { me: Me }) {
   // Mobile-only: which pane the phone-width bottom toggle shows.  Desktop
   // (md+) always shows both panel + editor side-by-side and ignores this.
   const [mobileView, setMobileView] = createSignal<"panel" | "editor">("panel")
+  // Drivers-only "+ Add repo" popover in the Repos section (mid-session add).
+  const [addRepoOpen, setAddRepoOpen] = createSignal(false)
 
   const myParticipant = () =>
     collab.session()?.participants.find((p) => p.githubId === props.me.githubId)
@@ -818,7 +853,28 @@ function CollabSessionInner(props: { me: Me }) {
                   )}
                 </For>
               </Show>
+              {/* Drivers can add another repo mid-session — clones it, creates
+                  the session branch in it, announces it to the LLM, and it
+                  joins the next "Open PR" (one PR per repo). */}
+              <Show when={myRole() === "driver"}>
+                <button
+                  type="button"
+                  onClick={() => setAddRepoOpen((v) => !v)}
+                  title="Add another repository to this session"
+                  class="ml-auto flex items-center gap-0.5 text-[10px] text-zinc-400 hover:text-zinc-200 bg-zinc-800/60 hover:bg-zinc-700/60 px-1.5 py-0.5 rounded-full border border-zinc-700/60 transition-colors"
+                >
+                  <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+                  </svg>
+                  {addRepoOpen() ? "Close" : "Add"}
+                </button>
+              </Show>
             </div>
+            <Show when={addRepoOpen() && myRole() === "driver"}>
+              <div class="mb-2">
+                <RepoPicker exclude={collab.session()?.repos ?? []} onDone={() => setAddRepoOpen(false)} />
+              </div>
+            </Show>
             {/* Repo list caps at ~5 rows and scrolls internally when the
                 session links to many repos — keeps the queue's flex-1
                 space from being squeezed. */}
@@ -1269,18 +1325,29 @@ interface FallbackRepo {
   private?: boolean
 }
 
-function EmptyReposPanel() {
+/**
+ * Repo multi-select + "Add" action.  Shared by the empty-session recovery
+ * panel and the mid-session "+ Add" control.  `exclude` hides repos already
+ * linked to the session; `onDone` fires after a clean add (no warnings) so a
+ * popover can close itself.  Surfaces any per-repo branch-collision warnings
+ * returned by the server.
+ */
+function RepoPicker(props: { exclude?: string[]; onDone?: () => void }) {
   const collab = useCollab()
-  const isDriver = () => collab.viewerRole() === "driver"
 
   const [repos] = createResource<FallbackRepo[]>(async () => {
     const res = await fetch("/collab/repos")
     if (!res.ok) return []
     return res.json()
   })
+  const available = createMemo(() => {
+    const ex = new Set(props.exclude ?? [])
+    return (repos() ?? []).filter((r) => !ex.has(r.full_name))
+  })
   const [selected, setSelected] = createSignal<string[]>([])
   const [adding, setAdding] = createSignal(false)
   const [err, setErr] = createSignal<string | null>(null)
+  const [warnings, setWarnings] = createSignal<Array<{ repo: string; message: string }>>([])
 
   function toggle(repoFullName: string) {
     setSelected((prev) =>
@@ -1291,16 +1358,84 @@ function EmptyReposPanel() {
   async function submit() {
     if (selected().length === 0) return
     setErr(null)
+    setWarnings([])
     setAdding(true)
     try {
-      await collab.addRepos(selected())
+      const res = await collab.addRepos(selected())
+      setWarnings(res.warnings ?? [])
       setSelected([])
+      // Keep the picker open when there are warnings so the Driver sees them;
+      // otherwise let the caller dismiss it.
+      if (!res.warnings?.length) props.onDone?.()
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
       setAdding(false)
     }
   }
+
+  return (
+    <Show
+      when={available().length > 0}
+      fallback={
+        <div class="text-sm text-zinc-500 text-center py-2">
+          {repos.loading ? "Loading repositories…" : "No more repositories to add."}
+        </div>
+      }
+    >
+      <div class="max-h-96 overflow-y-auto rounded-lg border border-zinc-800 divide-y divide-zinc-800 bg-zinc-900/40">
+        <For each={available()}>
+          {(repo) => (
+            <label class="flex items-start gap-3 px-3 py-2 cursor-pointer hover:bg-zinc-800/40">
+              <input
+                type="checkbox"
+                class="mt-1"
+                checked={selected().includes(repo.full_name)}
+                onChange={() => toggle(repo.full_name)}
+              />
+              <span class="flex-1 min-w-0">
+                <span class="text-sm text-zinc-200 truncate block">{repo.full_name}</span>
+                <Show when={repo.description}>
+                  <span class="text-xs text-zinc-500 line-clamp-1">{repo.description}</span>
+                </Show>
+              </span>
+            </label>
+          )}
+        </For>
+      </div>
+
+      <Show when={err()}>
+        <div class="text-xs text-red-400 mt-2">{err()}</div>
+      </Show>
+      <Show when={warnings().length > 0}>
+        <div class="mt-2 space-y-1">
+          <For each={warnings()}>
+            {(w) => (
+              <div class="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded px-2 py-1">
+                {w.message}
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
+
+      <div class="flex justify-end gap-2 mt-3">
+        <button
+          type="button"
+          class="px-3 py-1.5 text-sm rounded-md border border-zinc-700 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+          disabled={selected().length === 0 || adding()}
+          onClick={submit}
+        >
+          {adding() ? "Adding…" : `Add ${selected().length} repo${selected().length === 1 ? "" : "s"}`}
+        </button>
+      </div>
+    </Show>
+  )
+}
+
+function EmptyReposPanel() {
+  const collab = useCollab()
+  const isDriver = () => collab.viewerRole() === "driver"
 
   return (
     <div class="flex-1 flex flex-col items-center justify-center bg-zinc-950 p-8 overflow-auto">
@@ -1320,46 +1455,7 @@ function EmptyReposPanel() {
         </div>
 
         <Show when={isDriver()}>
-          <Show
-            when={repos()?.length}
-            fallback={<div class="text-sm text-zinc-500 text-center">Loading repositories…</div>}
-          >
-            <div class="max-h-96 overflow-y-auto rounded-lg border border-zinc-800 divide-y divide-zinc-800 bg-zinc-900/40">
-              <For each={repos() ?? []}>
-                {(repo) => (
-                  <label class="flex items-start gap-3 px-3 py-2 cursor-pointer hover:bg-zinc-800/40">
-                    <input
-                      type="checkbox"
-                      class="mt-1"
-                      checked={selected().includes(repo.full_name)}
-                      onChange={() => toggle(repo.full_name)}
-                    />
-                    <span class="flex-1 min-w-0">
-                      <span class="text-sm text-zinc-200 truncate block">{repo.full_name}</span>
-                      <Show when={repo.description}>
-                        <span class="text-xs text-zinc-500 line-clamp-1">{repo.description}</span>
-                      </Show>
-                    </span>
-                  </label>
-                )}
-              </For>
-            </div>
-
-            <Show when={err()}>
-              <div class="text-xs text-red-400 mt-2">{err()}</div>
-            </Show>
-
-            <div class="flex justify-end gap-2 mt-4">
-              <button
-                type="button"
-                class="px-3 py-1.5 text-sm rounded-md border border-zinc-700 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-                disabled={selected().length === 0 || adding()}
-                onClick={submit}
-              >
-                {adding() ? "Adding…" : `Add ${selected().length} repo${selected().length === 1 ? "" : "s"}`}
-              </button>
-            </div>
-          </Show>
+          <RepoPicker />
         </Show>
       </div>
     </div>

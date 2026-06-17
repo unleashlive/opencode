@@ -152,6 +152,16 @@ export interface InviteToken {
 
 // WebSocket message types broadcast to all Collab Session participants
 
+/**
+ * Outcome of attempting to open a PR on a single repo of a multi-repo collab
+ * session.  Returned (as `results[]`) by POST /collab/session/:id/pr.
+ */
+export type RepoPrResult = { repo: string } & (
+  | { status: "opened"; url: string }
+  | { status: "skipped"; reason: string }
+  | { status: "error"; error: string }
+)
+
 export type CollabEvent =
   | { type: "collab:participant_joined"; participant: Participant }
   | { type: "collab:participant_left"; githubLogin: string }
@@ -181,7 +191,14 @@ export type CollabEvent =
         | { kind: "note"; noteId: string; excerpt: string }
     }
   | { type: "collab:note_added"; note: CollabNote }
-  | { type: "collab:repos_added"; repos: string[]; addedBy: string }
+  | {
+      type: "collab:repos_added"
+      repos: string[]
+      addedBy: string
+      /** Per-repo branch-collision warnings raised while adding (the collab
+       *  branch name couldn't be created in that repo).  Absent when clean. */
+      warnings?: Array<{ repo: string; message: string }>
+    }
   /**
    * The collab session's server-side workspace (git clone + branch checkout +
    * native opencode session pre-warm) is fully ready.  The iframe SHOULD NOT
