@@ -164,6 +164,28 @@ export function setInitStatus(
   })
 }
 
+/** Returns the raw (possibly encrypted) Unleash MCP token, or null if not set. */
+export function getMcpToken(collabSessionId: string): string | null {
+  return Database.use((db) => {
+    const row = db
+      .select({ unleash_mcp_token: CollabSessionTable.unleash_mcp_token })
+      .from(CollabSessionTable)
+      .where(eq(CollabSessionTable.id, collabSessionId))
+      .get()
+    return row?.unleash_mcp_token ?? null
+  })
+}
+
+/** Persist the Unleash MCP token (should be pre-encrypted by the caller). */
+export function setMcpToken(collabSessionId: string, token: string | null): void {
+  Database.use((db) => {
+    db.update(CollabSessionTable)
+      .set({ unleash_mcp_token: token })
+      .where(eq(CollabSessionTable.id, collabSessionId))
+      .run()
+  })
+}
+
 export function listCollabSessions(ownerGithubId?: number): CollabSession[] {
   return Database.use((db) => {
     const rows = ownerGithubId

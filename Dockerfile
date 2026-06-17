@@ -161,6 +161,14 @@ ENV GIT_ASKPASS=/usr/local/bin/git-askpass-token
 # unleashlive/frontend's lockfile.
 RUN npm install --global pnpm@10 2>&1 | tail -3 && pnpm --version
 
+# Bundle the Unleash Live MCP server (pre-built Node.js bundle from the .mcpb
+# package).  Placed at a fixed path so the per-session opencode config (written
+# by workspace.ts when a Driver configures an access token) can reference it
+# without a runtime npm install.  The bundle is self-contained — no node_modules
+# needed alongside it.
+COPY packages/opencode/mcp-servers/unleash-live/index.js /usr/local/lib/unleash-live-mcp.js
+RUN chmod +x /usr/local/lib/unleash-live-mcp.js
+
 # Pre-install opencode-claude-auth into opencode's npm package cache.
 # Lives at /root/.cache/opencode/packages/<sanitized-pkg>/node_modules/<name>.
 # At runtime, @opencode-ai/core/npm.ts checks `existsSafe(...)` and short-circuits,
@@ -223,7 +231,7 @@ RUN mkdir -p /var/opencode/workspaces \
     # without SYS_ADMIN; `--isolated` gives each connect a throwaway profile (no
     # cross-session state, no disk growth).  60 s timeout because the first
     # connect launches the browser.
-    printf '{"plugin":["opencode-claude-auth@latest"],"disabled_providers":["amazon-bedrock"],"mcp":{"headroom":{"type":"local","command":["headroom","mcp","serve"],"enabled":true,"timeout":30000},"playwright":{"type":"local","command":["playwright-mcp","--headless","--no-sandbox","--isolated","--browser","chromium","--output-dir","/home/opencode/.cache/playwright-output"],"environment":{"PLAYWRIGHT_BROWSERS_PATH":"/home/opencode/.cache/playwright"},"enabled":false,"timeout":60000}}}\n' \
+    printf '{"plugin":["opencode-claude-auth@latest"],"disabled_providers":["amazon-bedrock"],"mcp":{"headroom":{"type":"local","command":["headroom","mcp","serve"],"enabled":true,"timeout":30000},"playwright":{"type":"local","command":["playwright-mcp","--headless","--no-sandbox","--isolated","--browser","chromium","--output-dir","/home/opencode/.cache/playwright-output"],"environment":{"PLAYWRIGHT_BROWSERS_PATH":"/home/opencode/.cache/playwright"},"enabled":false,"timeout":60000},"unleash-live":{"type":"local","command":["node","/usr/local/lib/unleash-live-mcp.js"],"environment":{"ACCESS_TOKEN":"","STAGE":"cirrus"},"enabled":false,"timeout":15000}}}\n' \
       > /home/opencode/.config/opencode/opencode.json && \
     # Global AGENTS.md — opencode auto-loads $XDG_CONFIG_HOME/opencode/AGENTS.md
     # (= /home/opencode/.config/opencode/AGENTS.md here) into the system

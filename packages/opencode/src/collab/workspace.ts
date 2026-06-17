@@ -10,7 +10,7 @@
  */
 
 import { spawn } from "child_process"
-import { mkdirSync, rmSync, existsSync, writeFileSync, renameSync, readdirSync, statSync } from "fs"
+import { mkdirSync, rmSync, existsSync, writeFileSync, renameSync, readdirSync, statSync, unlinkSync } from "fs"
 import { rm as rmAsync, stat as statAsync } from "fs/promises"
 import { join } from "path"
 import type { Participant } from "@opencode-ai/collab"
@@ -226,6 +226,56 @@ export function refreshParticipantsFile(
     const dest = repoWorkspacePath(collabSessionId, repo)
     if (!existsSync(join(dest, ".git"))) continue // not cloned yet — init will write it
     writeParticipantsFile(dest, participants)
+  }
+}
+
+// ── Per-session MCP config ───────────────────────────────────────────────────
+
+/** Path to the per-session opencode project config inside the primary repo. */
+function mcpConfigPath(collabSessionId: string, repos: string[]): string {
+  const dir = nativeSessionDirectory(collabSessionId, repos)
+  return join(dir, ".opencode", "opencode.json")
+}
+
+/**
+ * Write `.opencode/opencode.json` inside the session's primary repo dir with
+ * the Unleash Live MCP server enabled and the decrypted access token.
+ * Called by the PUT /mcp router endpoint whenever the Driver saves a token.
+ */
+export function writeMcpConfig(collabSessionId: string, repos: string[], plainToken: string): void {
+  const path = mcpConfigPath(collabSessionId, repos)
+  const dir = join(path, "..")
+  if (!existsSync(nativeSessionDirectory(collabSessionId, repos))) return // workspace not yet ready
+  mkdirSync(dir, { recursive: true })
+  const config = {
+    mcp: {
+      "unleash-live": {
+        type: "local",
+        command: ["node", "/usr/local/lib/unleash-live-mcp.js"],
+        environment: { ACCESS_TOKEN: plainToken, STAGE: "cirrus" },
+        enabled: true,
+        timeout: 15000,
+      },
+    },
+  }
+  const tmp = path + ".tmp"
+  writeFileSync(tmp, JSON.stringify(config, null, 2), { mode: 0o600 })
+  renameSync(tmp, path)
+  console.log("[collab.mcp] wrote per-session MCP config for", collabSessionId)
+}
+
+/**
+ * Remove `.opencode/opencode.json` for this session — disables the per-session
+ * MCP override so the global (disabled) entry takes effect.
+ */
+export function clearMcpConfig(collabSessionId: string, repos: string[]): void {
+  const path = mcpConfigPath(collabSessionId, repos)
+  if (!existsSync(path)) return
+  try {
+    unlinkSync(path)
+    console.log("[collab.mcp] removed per-session MCP config for", collabSessionId)
+  } catch (err) {
+    console.error("[collab.mcp] failed to remove MCP config:", err)
   }
 }
 

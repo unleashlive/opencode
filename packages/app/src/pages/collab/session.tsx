@@ -27,6 +27,7 @@ import { CollabProvider, useCollab } from "@/context/collab"
 import { InviteDialog } from "@/components/collab/InviteDialog"
 import { AddRepoDialog } from "@/components/collab/AddRepoDialog"
 import { TutorialDialog } from "@/components/collab/TutorialDialog"
+import { McpConfigDialog } from "@/components/collab/McpConfigDialog"
 import { TeamNoteComposer } from "@/components/collab/TeamNoteComposer"
 import { PreviewLauncher } from "@/components/collab/PreviewLauncher"
 import { base64Encode } from "@opencode-ai/core/util/encode"
@@ -687,6 +688,7 @@ function CollabSessionInner(props: { me: Me }) {
   // Drivers-only "+ Add repo" popover in the Repos section (mid-session add).
   const [addRepoOpen, setAddRepoOpen] = createSignal(false)
   const [showTutorial, setShowTutorial] = createSignal(false)
+  const [showMcpConfig, setShowMcpConfig] = createSignal(false)
 
   const myParticipant = () =>
     collab.session()?.participants.find((p) => p.githubId === props.me.githubId)
@@ -1016,6 +1018,22 @@ function CollabSessionInner(props: { me: Me }) {
           <CompactButton />
         </Show>
 
+        {/* Unleash Live MCP — Driver only. */}
+        <Show when={myRole() === "driver"}>
+          <div class="px-4 pb-1">
+            <button
+              type="button"
+              onClick={() => setShowMcpConfig(true)}
+              class={`${BTN_SECONDARY} w-full py-1.5 text-xs flex items-center justify-center gap-1.5`}
+            >
+              <Show when={collab.mcpConfigured()} fallback={<span>Configure Unleash MCP</span>}>
+                <span class="text-emerald-400">●</span>
+                <span>Unleash MCP active</span>
+              </Show>
+            </button>
+          </div>
+        </Show>
+
         {/* Export session — available to all participants. */}
         <ExportButton />
 
@@ -1196,7 +1214,7 @@ function CollabSessionInner(props: { me: Me }) {
                 // parent's stacking context, so even a z-index:99999 modal
                 // can have iframe content bleed through.  Hiding outright
                 // sidesteps the problem entirely.
-                style={`flex: 1; width: 100%; height: 100%; display: block; ${showInvite() || addRepoOpen() || showTutorial() ? "visibility: hidden;" : ""}`}
+                style={`flex: 1; width: 100%; height: 100%; display: block; ${showInvite() || addRepoOpen() || showTutorial() || showMcpConfig() ? "visibility: hidden;" : ""}`}
               />
             )
           }}
@@ -1222,6 +1240,11 @@ function CollabSessionInner(props: { me: Me }) {
           Repos section; clones the picks onto the collab branch mid-session. */}
       <Show when={addRepoOpen() && myRole() === "driver"}>
         <AddRepoDialog onClose={() => setAddRepoOpen(false)} />
+      </Show>
+
+      {/* MCP config dialog — Drivers only. */}
+      <Show when={showMcpConfig() && myRole() === "driver"}>
+        <McpConfigDialog onClose={() => setShowMcpConfig(false)} />
       </Show>
 
       {/* Mobile-only bottom toggle — switch between the collab panel and the

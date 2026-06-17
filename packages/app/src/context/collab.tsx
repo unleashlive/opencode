@@ -63,6 +63,10 @@ interface CollabContextValue {
   lastSuggestion: () => PromptSuggestion | null
   /** Driver-only: summarise older messages to free context tokens. */
   compact: () => Promise<void>
+  /** Whether the Unleash Live MCP is configured for this session. */
+  mcpConfigured: () => boolean
+  /** Driver-only: save (token=string) or clear (token=null) the Unleash Live PAT. */
+  configureMcp: (token: string | null) => Promise<void>
   /** Driver-only: append repos to a session (at create-time recovery or mid-
    *  session via the "+ Add" control).  Returns the actually-new repos
    *  (existing ones are skipped) plus any per-repo branch-collision warnings. */
@@ -166,6 +170,7 @@ export function CollabProvider(props: CollabProviderProps) {
   const [unreadMentions, setUnreadMentions] = createSignal<number>(0)
   const [notes, setNotes] = createSignal<CollabNote[]>([])
   const [lastSuggestion, setLastSuggestion] = createSignal<PromptSuggestion | null>(null)
+  const [mcpConfiguredState, setMcpConfiguredState] = createSignal(false)
   // Frontend live-preview state — null when no preview is running.  Server
   // broadcasts a "started" event on SSE (re)connect when one IS running, so
   // the SPA picks up the state on full page reloads too.  Backed up by a
@@ -290,6 +295,17 @@ export function CollabProvider(props: CollabProviderProps) {
       }
     } catch {
       // ignore — banner just stays in launch-ready state until first SSE event
+    }
+  })
+
+  onMount(async () => {
+    try {
+      const res = await fetch(`/collab/session/${props.collabSessionId}/mcp`)
+      if (!res.ok) return
+      const data = (await res.json()) as { configured: boolean }
+      setMcpConfiguredState(Boolean(data.configured))
+    } catch {
+      // ignore — treat as not configured
     }
   })
 
@@ -694,6 +710,11 @@ export function CollabProvider(props: CollabProviderProps) {
     },
     async compact() {
       await api("/compact", "POST")
+    },
+    mcpConfigured: mcpConfiguredState,
+    async configureMcp(token) {
+      await api("/mcp", "PUT", { token: token ?? null })
+      setMcpConfiguredState(token !== null && token !== "")
     },
     async addRepos(repos) {
       const res = await api("", "PATCH", { repos })
