@@ -8,7 +8,7 @@
 // does.  No HTML / navigation / `/collab/*` / `/pty/*` / `/preview/*` is ever
 // cached or intercepted; those go straight to the network.
 
-const CACHE = "collab-assets-v1"
+const CACHE = "collab-assets-v2"
 
 self.addEventListener("install", () => {
   self.skipWaiting()
@@ -28,7 +28,7 @@ function isImmutableAsset(url) {
   return (
     url.pathname.startsWith("/assets/") ||
     url.pathname.startsWith("/web-app-manifest-") ||
-    url.pathname === "/apple-touch-icon-v3.png"
+    url.pathname === "/apple-touch-icon.png"
   )
 }
 

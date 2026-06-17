@@ -69,7 +69,7 @@ const notify: Platform["notify"] = async (title, description, href) => {
 
   const notification = new Notification(title, {
     body: description ?? "",
-    icon: "/web-app-manifest-192x192.png",
+    icon: "/web-app-manifest-192x192.png?v=2",
   })
 
   notification.onclick = () => {

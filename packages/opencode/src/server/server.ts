@@ -312,16 +312,25 @@ const SIGN_IN_LANDING_HTML = `<!doctype html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Unleash Collab — sign in</title>
-  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
-  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
-  <link rel="shortcut icon" href="/favicon.ico" />
-  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=2" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png?v=2" />
+  <link rel="shortcut icon" href="/favicon.ico?v=2" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=2" />
   <link rel="manifest" href="/collab.webmanifest" />
   <meta name="theme-color" content="#09090b" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Collab" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Unleash Collab" />
+  <meta property="og:title" content="Unleash Collab" />
+  <meta property="og:description" content="Collaborative coding sessions for the unleashlive org." />
+  <meta property="og:url" content="https://collab.utils.unleashlive.com/" />
+  <meta property="og:image" content="https://collab.utils.unleashlive.com/og.png?v=2" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Unleash Collab" />
+  <meta name="twitter:image" content="https://collab.utils.unleashlive.com/og.png?v=2" />
   <style>
     :root { color-scheme: dark; }
     html, body { margin: 0; padding: 0; height: 100%; background: #0a0a0a; color: #e4e4e7; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
