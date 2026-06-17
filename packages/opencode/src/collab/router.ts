@@ -49,11 +49,12 @@ import {
   refreshParticipantsFile,
   cleanupSessionWorkspace,
   sessionWorkspacePath,
+  repoWorkspacePath,
   nativeSessionDirectory,
   readRepoBranches,
 } from "./workspace"
 import { readFile } from "node:fs/promises"
-import { openCollabPullRequest } from "./github-pr"
+import { openCollabPullRequests } from "./github-pr"
 import { toggleReaction, isAllowedEmoji } from "./reactions"
 import { mentionsToEvents } from "./mentions"
 import { insertNote, listRecentNotes } from "./notes"
@@ -69,7 +70,7 @@ import * as Preview from "./preview-launcher"
 // import — broadcastSse lives in this file and we don't want preview-launcher
 // pulling in the whole router for one function.
 Preview.setPreviewBroadcaster((collabSessionId, event) => broadcastSse(collabSessionId, event))
-import { resolveBranchName } from "./branch-resolve"
+import { resolveBranchName, branchExists } from "./branch-resolve"
 import { disposeAllInstances } from "@/project/instance-runtime"
 
 // Body cap shared by /prompt and /suggest (ADR-0008).  32 KB is well above
@@ -453,7 +454,14 @@ async function sendSeedPrompt(
 ): Promise<void> {
   const reposLine =
     repos.length > 0
-      ? `Linked repositories (cloned at ${workspacePath}): ${repos.join(", ")}`
+      ? [
+          `Linked repositories — your terminal opens in the first; the others are siblings you can cd into, read, edit, commit and push:`,
+          ...repos.map(
+            (r, i) =>
+              `  - ${r} → ${repoWorkspacePath(collabSessionId, r)}${i === 0 ? "   (current directory)" : ""}`,
+          ),
+          `If an editing tool refuses a path outside the current directory, use the terminal (cd into that repo) to make and commit the change there.`,
+        ].join("\n")
       : `No repositories linked to this session.`
   const branchLine = branch
     ? `Working on git branch: ${branch}.  Every commit you make here will land on this branch.`
@@ -492,6 +500,40 @@ async function sendSeedPrompt(
     }
   } catch (err) {
     console.error("[collab] seed prompt error:", err)
+  }
+}
+
+/**
+ * Tell the already-running native LLM session that one or more repos were just
+ * added mid-session (the seed prompt only fires at creation, so an added repo
+ * would otherwise be invisible to the model).  No-op when the session hasn't
+ * been warmed yet — the seed prompt will enumerate everything once it does.
+ */
+async function announceReposAdded(
+  collabSession: NonNullable<ReturnType<typeof Session.getCollabSession>>,
+  addedRepos: string[],
+): Promise<void> {
+  const nativeSessionId = collabSession.sessionId
+  if (!nativeSessionId || addedRepos.length === 0) return
+  const dir = nativeSessionDirectory(collabSession.id, collabSession.repos)
+  const branch = collabSession.branch
+  const text = [
+    `New ${addedRepos.length === 1 ? "repository was" : "repositories were"} just added to this collab session and cloned onto ${branch ? `branch \`${branch}\`` : "the current branch"}:`,
+    ...addedRepos.map((r) => `  - ${r} → ${repoWorkspacePath(collabSession.id, r)}`),
+    `You can read, edit, commit and push there (use the terminal to cd in if an editing tool refuses a path outside the current directory). No action needed yet — acknowledge in one short sentence.`,
+  ].join("\n")
+  try {
+    const res = await nativeFetch(`/session/${nativeSessionId}/prompt_async?directory=${encodeURIComponent(dir)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parts: [{ type: "text", text }] }),
+      collabSessionId: collabSession.id,
+    })
+    if (!res.ok) {
+      console.error("[collab] repo-added announce failed:", res.status, await res.text().catch(() => ""))
+    }
+  } catch (err) {
+    console.error("[collab] repo-added announce error:", err)
   }
 }
 
@@ -1424,13 +1466,40 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
     const requestedRepos = Array.isArray(body?.repos) ? body!.repos!.filter((s) => typeof s === "string") : []
     if (requestedRepos.length === 0) return json({ error: "repos: string[] required" }, 400)
     const added = Session.addRepos(sessionId, requestedRepos)
+    const warnings: Array<{ repo: string; message: string }> = []
     if (added.length > 0) {
-      // Fire-and-forget: clone the newly-added repos.  Existing repos in the
-      // workspace are untouched (initSessionWorkspace's existsSync guard).
-      // We pass the full new repo list so checkoutCollabBranch + commit-hook
-      // installation re-run idempotently across the whole set.
       const updated = Session.getCollabSession(sessionId)
       if (updated) {
+        // Branch-collision re-probe for the newly-added repos.  The creation-
+        // time probe (branch-resolve.ts) doesn't run on later adds, so a repo
+        // whose refs collide with the collab branch's first path segment (e.g.
+        // an existing leaf branch `collab` blocks `refs/heads/collab/...`) would
+        // silently fall back to its default branch on checkout.  Warn instead.
+        const branch = updated.branch
+        if (branch && branch.includes("/")) {
+          const firstSegment = branch.split("/", 1)[0]!
+          await Promise.all(
+            added.map(async (repo) => {
+              try {
+                if (await branchExists(repo, firstSegment, sess.githubAccessToken)) {
+                  warnings.push({
+                    repo,
+                    message:
+                      `Branch "${branch}" can't be created in ${repo} — a branch named ` +
+                      `"${firstSegment}" already exists (git ref collision). Work in this ` +
+                      `repo will stay on its default branch until the name is freed.`,
+                  })
+                }
+              } catch {
+                // Probe failure is non-fatal — clone/checkout will still try.
+              }
+            }),
+          )
+        }
+        // Fire-and-forget: clone the newly-added repos.  Existing repos in the
+        // workspace are untouched (initSessionWorkspace's existsSync guard).
+        // We pass only the new repos so the clone work is bounded; the hook +
+        // checkout run idempotently per repo.  Once cloned, announce to the LLM.
         initSessionWorkspace(
           sessionId,
           added,
@@ -1438,11 +1507,18 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
           updated.name,
           updated.branch,
           updated.participants,
-        ).catch((err) => console.error("[collab.patch] workspace init for added repos failed:", err))
+        )
+          .then(() => announceReposAdded(updated, added))
+          .catch((err) => console.error("[collab.patch] workspace init for added repos failed:", err))
       }
-      broadcastSse(sessionId, { type: "collab:repos_added", repos: added, addedBy: sess.githubLogin })
+      broadcastSse(sessionId, {
+        type: "collab:repos_added",
+        repos: added,
+        addedBy: sess.githubLogin,
+        ...(warnings.length > 0 ? { warnings } : {}),
+      })
     }
-    return json({ added })
+    return json({ added, ...(warnings.length > 0 ? { warnings } : {}) })
   }
 
   // GET /collab/session/:id/repos — list org repos
@@ -1670,20 +1746,20 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
     )
   }
 
-  // POST /collab/session/:id/pr — Driver only.  git push + open PR on GitHub.
+  // POST /collab/session/:id/pr — Driver only.  Push + open one PR per linked
+  // repo (repos with no commits on the collab branch are skipped).
   if (req.method === "POST" && parts[3] === "pr") {
     if (caller.role !== "driver") return json({ error: "Forbidden — Drivers only" }, 403)
     const c = cfg()
     console.log("[collab.pr]", { sessionId, login: sess.githubLogin })
-    // PR creator = the Driver who clicked the button.  Their OAuth token
-    // does the push + PR-open call (ADR-0005 Option B).
-    const result = await openCollabPullRequest(collabSession, c.baseUrl, sess.githubAccessToken)
-    if (!result.ok) {
-      console.error("[collab.pr] failed", { sessionId, status: result.status, error: result.error })
-      return json({ error: result.error }, result.status)
-    }
-    console.log("[collab.pr] opened", { sessionId, url: result.url })
-    return json({ url: result.url }, 201)
+    // PR creator = the Driver who clicked the button.  Their OAuth token does
+    // the push + PR-open call for every repo (ADR-0005 Option B).
+    const { results } = await openCollabPullRequests(collabSession, c.baseUrl, sess.githubAccessToken)
+    const opened = results.filter((r) => r.status === "opened").length
+    const skipped = results.filter((r) => r.status === "skipped").length
+    const errored = results.filter((r) => r.status === "error").length
+    console.log("[collab.pr] done", { sessionId, opened, skipped, errored })
+    return json({ results }, 200)
   }
 
   // POST /collab/session/:id/prompt — submit a prompt.
