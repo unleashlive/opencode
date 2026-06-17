@@ -26,6 +26,7 @@ import { useParams } from "@solidjs/router"
 import { CollabProvider, useCollab } from "@/context/collab"
 import { InviteDialog } from "@/components/collab/InviteDialog"
 import { AddRepoDialog } from "@/components/collab/AddRepoDialog"
+import { TutorialDialog } from "@/components/collab/TutorialDialog"
 import { TeamNoteComposer } from "@/components/collab/TeamNoteComposer"
 import { PreviewLauncher } from "@/components/collab/PreviewLauncher"
 import { base64Encode } from "@opencode-ai/core/util/encode"
@@ -535,6 +536,7 @@ function CollabSessionInner(props: { me: Me }) {
   const [mobileView, setMobileView] = createSignal<"panel" | "editor">("panel")
   // Drivers-only "+ Add repo" popover in the Repos section (mid-session add).
   const [addRepoOpen, setAddRepoOpen] = createSignal(false)
+  const [showTutorial, setShowTutorial] = createSignal(false)
 
   const myParticipant = () =>
     collab.session()?.participants.find((p) => p.githubId === props.me.githubId)
@@ -670,8 +672,19 @@ function CollabSessionInner(props: { me: Me }) {
             </h1>
           </div>
           <button
-            onClick={() => setShowInvite(true)}
+            onClick={() => setShowTutorial(true)}
             class="ml-2 p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 flex-shrink-0 transition-colors"
+            title="Quick start guide & keyboard shortcuts"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" stroke-linecap="round" stroke-linejoin="round" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" />
+              <circle cx="12" cy="17" r=".5" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+          <button
+            onClick={() => setShowInvite(true)}
+            class="ml-1 p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 flex-shrink-0 transition-colors"
             title="Invite participants"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -996,7 +1009,7 @@ function CollabSessionInner(props: { me: Me }) {
                 // parent's stacking context, so even a z-index:99999 modal
                 // can have iframe content bleed through.  Hiding outright
                 // sidesteps the problem entirely.
-                style={`flex: 1; width: 100%; height: 100%; display: block; ${showInvite() || addRepoOpen() ? "visibility: hidden;" : ""}`}
+                style={`flex: 1; width: 100%; height: 100%; display: block; ${showInvite() || addRepoOpen() || showTutorial() ? "visibility: hidden;" : ""}`}
               />
             )
           }}
@@ -1007,6 +1020,11 @@ function CollabSessionInner(props: { me: Me }) {
         </Show>
         </Show>
       </div>
+
+      {/* Tutorial / help dialog */}
+      <Show when={showTutorial()}>
+        <TutorialDialog onClose={() => setShowTutorial(false)} />
+      </Show>
 
       {/* Invite dialog */}
       <Show when={showInvite()}>
