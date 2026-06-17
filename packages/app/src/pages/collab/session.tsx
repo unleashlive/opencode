@@ -280,6 +280,156 @@ function OpenPrButton() {
   )
 }
 
+// ── Compact context button ────────────────────────────────────────────────────
+
+function CompactButton() {
+  const collab = useCollab()
+  const [busy, setBusy] = createSignal(false)
+  const [done, setDone] = createSignal(false)
+  const [err, setErr] = createSignal<string | null>(null)
+
+  async function compact() {
+    setBusy(true)
+    setDone(false)
+    setErr(null)
+    try {
+      await collab.compact()
+      setDone(true)
+      setTimeout(() => setDone(false), 3000)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div class="px-3 pb-3 flex-shrink-0 space-y-1">
+      <button
+        type="button"
+        onClick={compact}
+        disabled={busy()}
+        title="Summarise older messages to free up context tokens"
+        class={`${BTN_SECONDARY} w-full py-1.5 text-xs`}
+      >
+        <Show when={!busy()} fallback={
+          <>
+            <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            Compacting…
+          </>
+        }>
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8 9l4-4 4 4M8 15l4 4 4-4" />
+          </svg>
+          <Show when={done()} fallback="Compact context">Context compacted ✓</Show>
+        </Show>
+      </button>
+      <Show when={err()}>
+        <div class="text-[10px] text-red-400">{err()}</div>
+      </Show>
+    </div>
+  )
+}
+
+// ── Session export ────────────────────────────────────────────────────────────
+
+function formatExportMarkdown(data: {
+  session: { id: string; name: string; branch: string | null; repos: string[]; createdAt: Date; participants: Array<{ githubLogin: string; role: string }> }
+  suggestions: Array<{ authorGithubLogin: string; content: string; status: string; model?: string; agent?: string; variant?: string; createdAt: Date }>
+}): string {
+  const { session, suggestions } = data
+  const date = new Date(session.createdAt).toISOString().split("T")[0]
+  const repoList = session.repos.join(", ") || "—"
+
+  const lines: string[] = [
+    `# Collab Session: ${session.name}`,
+    ``,
+    `| Field | Value |`,
+    `|-------|-------|`,
+    `| Branch | \`${session.branch ?? "—"}\` |`,
+    `| Repos | ${repoList} |`,
+    `| Created | ${date} |`,
+    `| Participants | ${session.participants.map((p) => `@${p.githubLogin} (${p.role})`).join(", ")} |`,
+    ``,
+    `---`,
+    ``,
+    `## Prompt History`,
+    ``,
+  ]
+
+  const submitted = suggestions.filter((s) => s.status === "submitted" || s.status === "approved" || s.status === "in_flight")
+
+  if (submitted.length === 0) {
+    lines.push("_No prompts submitted yet._")
+  } else {
+    for (const s of submitted) {
+      const ts = new Date(s.createdAt).toISOString().replace("T", " ").slice(0, 16)
+      const modelLabel = s.model ? s.model.split("/").pop() : null
+      const meta = [modelLabel, s.variant, s.agent ? `agent:${s.agent}` : null].filter(Boolean).join(" · ")
+      lines.push(`### [${ts}] @${s.authorGithubLogin}${meta ? `  ·  ${meta}` : ""}`)
+      lines.push(``)
+      for (const line of s.content.split("\n")) lines.push(`> ${line}`)
+      lines.push(``)
+      lines.push(`---`)
+      lines.push(``)
+    }
+  }
+
+  return lines.join("\n")
+}
+
+function ExportButton() {
+  const collab = useCollab()
+  const [busy, setBusy] = createSignal(false)
+  const [err, setErr] = createSignal<string | null>(null)
+
+  async function exportSession() {
+    const sessionId = collab.session()?.id
+    if (!sessionId) return
+    setBusy(true)
+    setErr(null)
+    try {
+      const res = await fetch(`/collab/session/${sessionId}/export`)
+      if (!res.ok) throw new Error(`Export failed (${res.status})`)
+      const data = await res.json()
+      const md = formatExportMarkdown(data)
+      const blob = new Blob([md], { type: "text/markdown" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `collab-${collab.session()?.name?.replace(/[^a-z0-9]/gi, "-").toLowerCase() ?? sessionId}.md`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div class="px-3 pb-2 flex-shrink-0">
+      <button
+        type="button"
+        onClick={exportSession}
+        disabled={busy()}
+        class="w-full text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors flex items-center justify-center gap-1.5 py-1"
+      >
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+        {busy() ? "Exporting…" : "Export session"}
+      </button>
+      <Show when={err()}>
+        <div class="text-[10px] text-red-400 text-center mt-1">{err()}</div>
+      </Show>
+    </div>
+  )
+}
+
 // ── Prompt input (role-aware) ─────────────────────────────────────────────────
 
 function PromptInput(props: {
@@ -693,7 +843,7 @@ function CollabSessionInner(props: { me: Me }) {
           </button>
         </div>
 
-        {/* Role badge */}
+        {/* Role badge + agent/model status */}
         <div class="px-4 py-2 border-b border-zinc-800/60 flex-shrink-0">
           <div class="flex items-center gap-2">
             <img
@@ -706,6 +856,35 @@ function CollabSessionInner(props: { me: Me }) {
               {roleLabel(myRole())}
             </span>
           </div>
+          {/* Agent / model pills — show last agent + model used by the LLM in this session */}
+          <Show when={collab.lastSuggestion()}>
+            {(s) => {
+              const agentName = () => s().agent ?? "build"
+              const modelName = () => {
+                const m = s().model
+                if (!m) return null
+                return m.includes("/") ? m.split("/").slice(1).join("/") : m
+              }
+              const variantName = () => s().variant
+              return (
+                <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                  <span class="inline-flex items-center gap-0.5 text-[10px] bg-zinc-800/60 text-zinc-400 rounded px-1.5 py-0.5 font-mono">
+                    🤖 {agentName()}
+                  </span>
+                  <Show when={modelName()}>
+                    {(m) => (
+                      <span class="inline-flex items-center gap-0.5 text-[10px] bg-zinc-800/60 text-zinc-400 rounded px-1.5 py-0.5 font-mono">
+                        {m()}
+                        <Show when={variantName()}>
+                          {(v) => <span class="text-zinc-500"> {v()}</span>}
+                        </Show>
+                      </span>
+                    )}
+                  </Show>
+                </div>
+              )
+            }}
+          </Show>
         </div>
 
         {/* Participants — inner list caps at ~6 rows and scrolls internally;
@@ -831,6 +1010,14 @@ function CollabSessionInner(props: { me: Me }) {
         <Show when={myRole() === "driver" && (collab.session()?.repos?.length ?? 0) > 0}>
           <OpenPrButton />
         </Show>
+
+        {/* Compact context — Drivers only, only when a native session exists. */}
+        <Show when={myRole() === "driver" && !!collab.session()?.sessionId}>
+          <CompactButton />
+        </Show>
+
+        {/* Export session — available to all participants. */}
+        <ExportButton />
 
         {/* Repos — each row also shows the active branch in that repo.
             The "preview :port" pills live next to the Repos title (rather

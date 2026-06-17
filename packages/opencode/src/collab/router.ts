@@ -58,6 +58,7 @@ import { openCollabPullRequests } from "./github-pr"
 import { toggleReaction, isAllowedEmoji } from "./reactions"
 import { mentionsToEvents } from "./mentions"
 import { insertNote, listRecentNotes } from "./notes"
+import { getAllSuggestionsForSession } from "./db-impl"
 import { nativeFetch } from "./native-api"
 import { revokeInternalToken } from "./internal-token"
 import { encryptToken, decryptToken, isEncrypted } from "./crypto"
@@ -1744,6 +1745,58 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
       },
       200,
     )
+  }
+
+  // GET /collab/session/:id/export — all participants.  Returns session
+  // metadata + every prompt suggestion in creation order (all statuses).
+  // Used by the frontend "Export" button to generate a markdown download.
+  if (req.method === "GET" && parts[3] === "export") {
+    const suggestions = getAllSuggestionsForSession(sessionId)
+    return json(
+      {
+        session: {
+          id: collabSession.id,
+          name: collabSession.name,
+          branch: collabSession.branch,
+          repos: collabSession.repos,
+          createdAt: collabSession.createdAt,
+          participants: collabSession.participants.map((p) => ({
+            githubLogin: p.githubLogin,
+            role: p.role,
+          })),
+        },
+        suggestions: suggestions.map((s) => ({
+          id: s.id,
+          authorGithubLogin: s.authorGithubLogin,
+          content: s.content,
+          status: s.status,
+          model: s.model,
+          agent: s.agent,
+          variant: s.variant,
+          createdAt: s.createdAt,
+        })),
+      },
+      200,
+    )
+  }
+
+  // POST /collab/session/:id/compact — Driver only.  Delegates to the native
+  // opencode session compact endpoint to summarise old context and free tokens.
+  if (req.method === "POST" && parts[3] === "compact") {
+    if (caller.role !== "driver") return json({ error: "Forbidden — Drivers only" }, 403)
+    const nativeSessionId = collabSession.sessionId
+    if (!nativeSessionId) return json({ error: "Native session not ready yet" }, 409)
+    console.log("[collab.compact]", { sessionId, login: sess.githubLogin, nativeSessionId })
+    const res = await nativeFetch(`/api/session/${nativeSessionId}/compact`, {
+      method: "POST",
+      collabSessionId: sessionId,
+    })
+    if (!res.ok && res.status !== 204) {
+      const body = await res.text().catch(() => `HTTP ${res.status}`)
+      console.error("[collab.compact] failed:", body)
+      return json({ error: "Compact failed" }, 502)
+    }
+    return json({ ok: true }, 200)
   }
 
   // POST /collab/session/:id/pr — Driver only.  Push + open one PR per linked
