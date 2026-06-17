@@ -25,6 +25,7 @@ import {
 import { useParams } from "@solidjs/router"
 import { CollabProvider, useCollab } from "@/context/collab"
 import { InviteDialog } from "@/components/collab/InviteDialog"
+import { AddRepoDialog } from "@/components/collab/AddRepoDialog"
 import { TeamNoteComposer } from "@/components/collab/TeamNoteComposer"
 import { PreviewLauncher } from "@/components/collab/PreviewLauncher"
 import { base64Encode } from "@opencode-ai/core/util/encode"
@@ -870,11 +871,6 @@ function CollabSessionInner(props: { me: Me }) {
                 </button>
               </Show>
             </div>
-            <Show when={addRepoOpen() && myRole() === "driver"}>
-              <div class="mb-2">
-                <RepoPicker exclude={collab.session()?.repos ?? []} onDone={() => setAddRepoOpen(false)} />
-              </div>
-            </Show>
             {/* Repo list caps at ~5 rows and scrolls internally when the
                 session links to many repos — keeps the queue's flex-1
                 space from being squeezed. */}
@@ -1000,7 +996,7 @@ function CollabSessionInner(props: { me: Me }) {
                 // parent's stacking context, so even a z-index:99999 modal
                 // can have iframe content bleed through.  Hiding outright
                 // sidesteps the problem entirely.
-                style={`flex: 1; width: 100%; height: 100%; display: block; ${showInvite() ? "visibility: hidden;" : ""}`}
+                style={`flex: 1; width: 100%; height: 100%; display: block; ${showInvite() || addRepoOpen() ? "visibility: hidden;" : ""}`}
               />
             )
           }}
@@ -1015,6 +1011,12 @@ function CollabSessionInner(props: { me: Me }) {
       {/* Invite dialog */}
       <Show when={showInvite()}>
         <InviteDialog onClose={() => setShowInvite(false)} />
+      </Show>
+
+      {/* Add-repo dialog — Drivers only.  Toggled by the "+ Add" control in the
+          Repos section; clones the picks onto the collab branch mid-session. */}
+      <Show when={addRepoOpen() && myRole() === "driver"}>
+        <AddRepoDialog onClose={() => setAddRepoOpen(false)} />
       </Show>
 
       {/* Mobile-only bottom toggle — switch between the collab panel and the
