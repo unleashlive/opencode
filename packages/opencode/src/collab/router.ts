@@ -52,6 +52,8 @@ import {
   repoWorkspacePath,
   nativeSessionDirectory,
   readRepoBranches,
+  writeMcpConfig,
+  clearMcpConfig,
 } from "./workspace"
 import { readFile } from "node:fs/promises"
 import { openCollabPullRequests } from "./github-pr"
@@ -1795,6 +1797,34 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
       const body = await res.text().catch(() => `HTTP ${res.status}`)
       console.error("[collab.compact] failed:", body)
       return json({ error: "Compact failed" }, 502)
+    }
+    return json({ ok: true }, 200)
+  }
+
+  // GET /collab/session/:id/mcp — returns whether the Unleash Live MCP is configured.
+  // All participants can read this (they just see enabled/not, not the token itself).
+  if (req.method === "GET" && parts[3] === "mcp") {
+    const token = Session.getMcpToken(sessionId)
+    return json({ configured: token !== null }, 200)
+  }
+
+  // PUT /collab/session/:id/mcp — Driver only.  Save or clear the Unleash Live PAT.
+  // Body: { token: string } to set, or { token: null | "" } to remove.
+  if (req.method === "PUT" && parts[3] === "mcp") {
+    if (caller.role !== "driver") return json({ error: "Forbidden — Drivers only" }, 403)
+    const body = await req.json().catch(() => null)
+    const rawToken = body?.token
+    const secret = process.env["SESSION_SECRET"] ?? ""
+
+    if (rawToken && typeof rawToken === "string") {
+      const encrypted = encryptToken(rawToken, secret)
+      Session.setMcpToken(sessionId, encrypted)
+      writeMcpConfig(sessionId, collabSession.repos, rawToken)
+      console.log("[collab.mcp] token saved for", sessionId, "by", sess.githubLogin)
+    } else {
+      Session.setMcpToken(sessionId, null)
+      clearMcpConfig(sessionId, collabSession.repos)
+      console.log("[collab.mcp] token cleared for", sessionId, "by", sess.githubLogin)
     }
     return json({ ok: true }, 200)
   }

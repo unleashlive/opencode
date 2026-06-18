@@ -46,6 +46,13 @@ export const CollabSessionTable = sqliteTable("collab_session", {
    */
   preview_crash_count: integer().notNull().default(0),
   preview_crash_at: integer({ mode: "timestamp_ms" }),
+  /**
+   * Encrypted Unleash Live personal access token (ul_pat_...).  Set by the
+   * Driver via PUT /collab/session/:id/mcp.  When non-null, workspace.ts
+   * writes a per-session .opencode/opencode.json that enables the
+   * unleash-live MCP server with this token + STAGE=cirrus.
+   */
+  unleash_mcp_token: text(),
   created_at: integer({ mode: "timestamp_ms" }).notNull(),
   deleted_at: integer({ mode: "timestamp_ms" }),
 })

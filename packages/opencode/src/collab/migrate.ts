@@ -171,6 +171,12 @@ export function runCollabMigrations() {
       db.$client.exec("ALTER TABLE collab_session ADD COLUMN preview_crash_at INTEGER")
     }
 
+    // unleash_mcp_token — encrypted Unleash Live PAT, set by Driver via the
+    // "Configure MCP" dialog.  Legacy rows have no token (null = not configured).
+    if (!cols.some((c) => c.name === "unleash_mcp_token")) {
+      db.$client.exec("ALTER TABLE collab_session ADD COLUMN unleash_mcp_token TEXT")
+    }
+
     // Boot sweep: revert mid-flight LLM dispatches back to `approved` so the
     // newly-booted task's queue executor picks them up and re-runs them.  A
     // row sits in `in_flight` ONLY while the previous container had an open
