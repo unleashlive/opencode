@@ -58,6 +58,11 @@ interface CollabContextValue {
   /** Viewer's role in this collab session.  Falls back to "viewer" until
    *  the session/participant data has loaded (safe default for gating UI). */
   viewerRole: () => CollabRole
+  /** Most recently dispatched-to-LLM suggestion (updated via SSE collab:prompt_submitted).
+   *  Use to derive the current agent / model / variant for display.  Null before first submit. */
+  lastSuggestion: () => PromptSuggestion | null
+  /** Driver-only: summarise older messages to free context tokens. */
+  compact: () => Promise<void>
   /** Driver-only: append repos to a session (at create-time recovery or mid-
    *  session via the "+ Add" control).  Returns the actually-new repos
    *  (existing ones are skipped) plus any per-repo branch-collision warnings. */
@@ -160,6 +165,7 @@ export function CollabProvider(props: CollabProviderProps) {
   const [previewPorts, setPreviewPorts] = createSignal<number[]>([])
   const [unreadMentions, setUnreadMentions] = createSignal<number>(0)
   const [notes, setNotes] = createSignal<CollabNote[]>([])
+  const [lastSuggestion, setLastSuggestion] = createSignal<PromptSuggestion | null>(null)
   // Frontend live-preview state — null when no preview is running.  Server
   // broadcasts a "started" event on SSE (re)connect when one IS running, so
   // the SPA picks up the state on full page reloads too.  Backed up by a
@@ -452,6 +458,12 @@ export function CollabProvider(props: CollabProviderProps) {
         setQueue(event.queue)
         break
 
+      case "collab:prompt_submitted":
+        // Track the most-recently-dispatched suggestion so the panel can display
+        // which agent / model / variant is currently active in the LLM session.
+        setLastSuggestion(event.suggestion)
+        break
+
       case "collab:vote_cast":
         setQueue((prev) =>
           prev.map((s) =>
@@ -640,6 +652,7 @@ export function CollabProvider(props: CollabProviderProps) {
     unreadMentions,
     clearMentions: () => setUnreadMentions(0),
     notes,
+    lastSuggestion,
     viewerRole: () => {
       const sess = session()
       if (!sess || props.meGithubId == null) return "viewer"
@@ -678,6 +691,9 @@ export function CollabProvider(props: CollabProviderProps) {
     async openPullRequest() {
       const res = await api("/pr", "POST")
       return res.json() as Promise<{ results: RepoPrResult[] }>
+    },
+    async compact() {
+      await api("/compact", "POST")
     },
     async addRepos(repos) {
       const res = await api("", "PATCH", { repos })

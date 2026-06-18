@@ -46,6 +46,27 @@ function readReactions(db: any, suggestionId: string): Record<string, string[]> 
   return out
 }
 
+/** All suggestions for a session regardless of status, oldest-first. Used by the export endpoint. */
+export function getAllSuggestionsForSession(collabSessionId: string): PromptSuggestion[] {
+  return Database.use((db) => {
+    const rows = db
+      .select()
+      .from(CollabSuggestionTable)
+      .where(eq(CollabSuggestionTable.collab_session_id, collabSessionId))
+      .orderBy(asc(CollabSuggestionTable.created_at))
+      .all()
+
+    return rows.map((r) => {
+      const votes = db
+        .select({ voter: CollabVoteTable.voter_github_login })
+        .from(CollabVoteTable)
+        .where(eq(CollabVoteTable.suggestion_id, r.id))
+        .all()
+      return rowToSuggestion(r, votes.map((v) => v.voter), readReactions(db, r.id))
+    })
+  })
+}
+
 export const collabDb: CollabDB = {
   insertSuggestion(params) {
     Database.use((db) => {
