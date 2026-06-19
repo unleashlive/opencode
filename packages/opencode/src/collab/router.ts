@@ -894,6 +894,26 @@ function handleCollabRequestInner(req: Request): Promise<Response> | Response {
     return handleClaudeCredsUpload(req)
   }
 
+  // POST /collab/auth/logout — invalidate current session cookie
+  if (req.method === "POST" && path === "/collab/auth/logout") {
+    const cookie = parseCookies(req.headers.get("cookie") ?? "")
+    const sid = cookie["collab_sid"]
+    if (sid) {
+      Database.use((db) => {
+        db.delete(CollabAuthSessionTable).where(eq(CollabAuthSessionTable.token, sid)).run()
+      })
+    }
+    const collabDomain = process.env["COLLAB_DOMAIN"]?.trim().toLowerCase().split(":")[0]
+    const domainAttr = collabDomain ? `Domain=.${collabDomain}; ` : ""
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Set-Cookie": `collab_sid=; ${domainAttr}Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
+      },
+    })
+  }
+
   // GET /collab/me — current authenticated user info
   if (req.method === "GET" && path === "/collab/me") {
     const sess = getSession(req)

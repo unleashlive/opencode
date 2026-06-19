@@ -857,6 +857,18 @@ function CollabSessionInner(props: { me: Me }) {
             <span class={`ml-auto text-xs font-medium ${roleColor(myRole())}`}>
               {roleLabel(myRole())}
             </span>
+            <button
+              onClick={async () => {
+                await fetch("/collab/auth/logout", { method: "POST" })
+                window.location.href = `/collab/auth/github?next=/collab/${collab.session()?.id ?? ""}`
+              }}
+              title="Sign out and re-authenticate with GitHub"
+              class="p-1 rounded text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800 transition-colors"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+              </svg>
+            </button>
           </div>
           {/* Agent / model pills — show last agent + model used by the LLM in this session */}
           <Show when={collab.lastSuggestion()}>
