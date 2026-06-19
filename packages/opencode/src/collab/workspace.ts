@@ -651,12 +651,20 @@ esac
 
 /**
  * Remove workspace directory when a session is deleted.
+ *
+ * Uses the async fs/promises rm so the libuv thread pool does the filesystem
+ * work off-thread — identical reasoning to cleanupOrphanWorkspaces.  A large
+ * repo (e.g. the 1.5 GB frontend clone on EFS) previously blocked the event
+ * loop for long enough that the ALB health check timed out and killed the task.
+ * Fire-and-forget: callers don't need to wait for the disk to be clean before
+ * returning a response to the client.
  */
 export function cleanupSessionWorkspace(collabSessionId: string): void {
   const root = sessionWorkspacePath(collabSessionId)
-  if (existsSync(root)) {
-    rmSync(root, { recursive: true, force: true })
-  }
+  if (!existsSync(root)) return
+  rmAsync(root, { recursive: true, force: true }).catch((err) => {
+    console.error("[collab.workspace] cleanupSessionWorkspace failed for", collabSessionId, err)
+  })
 }
 
 /**
