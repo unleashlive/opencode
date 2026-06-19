@@ -24,6 +24,9 @@
  *   POST /collab/session/:id/preview/stop      → Driver stops the running dev server
  *   POST /collab/session/:id/preview/restart   → Driver SIGTERMs + relaunches
  *   GET  /collab/session/:id/preview/state     → snapshot of the running preview
+ *   POST /collab/preview-task/register         → ECS task registers its private IP (internal)
+ *   POST /collab/preview-task/heartbeat        → ECS task keepalive (internal)
+ *   POST /collab/preview-task/log              → ECS task log line forwarding (internal)
  *   GET  /collab/claude-creds/status     → does the container have Claude auth?
  *   POST /collab/claude-creds            → upload a fresh Claude credentials JSON
  */
@@ -914,6 +917,57 @@ function handleCollabRequestInner(req: Request): Promise<Response> | Response {
     })
   }
 
+  // ── ECS preview-task internal endpoints (no user auth — reachable only from
+  //    the preview task's private subnet, not from the public internet) ───────
+
+  // POST /collab/preview-task/register
+  // Body: { collabSessionId: string, privateIp: string, taskArn: string }
+  // Called by preview-entrypoint.js on task startup to give the collab server
+  // the task's private IP so the proxy can route traffic to it.
+  if (req.method === "POST" && path === "/collab/preview-task/register") {
+    const body = (await req.json().catch(() => ({}))) as {
+      collabSessionId?: string
+      privateIp?: string
+      taskArn?: string
+    }
+    const { collabSessionId, privateIp, taskArn } = body
+    if (typeof collabSessionId !== "string" || typeof privateIp !== "string") {
+      return json({ error: "Missing collabSessionId or privateIp" }, 400)
+    }
+    Preview.registerPreviewTask(collabSessionId, privateIp, taskArn ?? "unknown")
+    return json({ ok: true })
+  }
+
+  // POST /collab/preview-task/heartbeat
+  // Body: { collabSessionId: string }
+  // Called every 60 s by the ECS task to reset the install-hang watchdog.
+  if (req.method === "POST" && path === "/collab/preview-task/heartbeat") {
+    const body = (await req.json().catch(() => ({}))) as { collabSessionId?: string }
+    if (typeof body.collabSessionId !== "string") {
+      return json({ error: "Missing collabSessionId" }, 400)
+    }
+    Preview.receiveHeartbeat(body.collabSessionId)
+    return json({ ok: true })
+  }
+
+  // POST /collab/preview-task/log
+  // Body: { collabSessionId: string, stream: "stdout"|"stderr", line: string }
+  // Called for each stdout/stderr line the ECS task emits.  The collab server
+  // stores the line, detects the ready pattern, and rebroadcasts via SSE.
+  if (req.method === "POST" && path === "/collab/preview-task/log") {
+    const body = (await req.json().catch(() => ({}))) as {
+      collabSessionId?: string
+      stream?: string
+      line?: string
+    }
+    if (typeof body.collabSessionId !== "string" || typeof body.line !== "string") {
+      return json({ error: "Missing collabSessionId or line" }, 400)
+    }
+    const stream = body.stream === "stderr" ? "stderr" : "stdout"
+    Preview.receivePreviewLog(body.collabSessionId, stream, body.line)
+    return json({ ok: true })
+  }
+
   // GET /collab/me — current authenticated user info
   if (req.method === "GET" && path === "/collab/me") {
     const sess = getSession(req)
@@ -1701,13 +1755,11 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
   // POST /collab/session/:id/preview/stop — Driver only.
   if (req.method === "POST" && parts[3] === "preview" && parts[4] === "stop") {
     if (caller.role !== "driver") return json({ error: "Forbidden — Drivers only" }, 403)
-    const cur = Preview.getPreviewState()
-    if (!cur || cur.collabSessionId !== sessionId) {
+    const cur = Preview.getPreviewState(sessionId)
+    if (!cur) {
       return json({ error: "No preview running for this session." }, 404)
     }
-    Preview.stopPreview("explicit")
-    // Clear the intent so resumePreviewsOnBoot doesn't resurrect a preview
-    // the Driver intentionally tore down.
+    Preview.stopPreview(sessionId, "explicit")
     Session.setPreviewIntent(sessionId, null)
     return json({ ok: true })
   }
@@ -1717,11 +1769,11 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
     if (caller.role !== "driver") return json({ error: "Forbidden — Drivers only" }, 403)
     const rl = checkRateLimit(`preview-launch:${sess.githubId}`, 10, 60 * 60 * 1000)
     if (!rl.ok) return rateLimitedResponse(rl.retryAfter)
-    const cur = Preview.getPreviewState()
-    if (!cur || cur.collabSessionId !== sessionId) {
+    const cur = Preview.getPreviewState(sessionId)
+    if (!cur) {
       return json({ error: "No preview running for this session." }, 404)
     }
-    const result = Preview.restartPreview()
+    const result = Preview.restartPreview(sessionId)
     if (!result.ok) return json({ error: result.error }, result.status)
     return json(result.state, 202)
   }
@@ -1730,8 +1782,8 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
   // Snapshot of the running preview (if any) so the SPA can render its
   // launcher banner on page load without waiting for the next SSE event.
   if (req.method === "GET" && parts[3] === "preview" && parts[4] === "state") {
-    const cur = Preview.getPreviewState()
-    if (!cur || cur.collabSessionId !== sessionId) return json(null, 200)
+    const cur = Preview.getPreviewState(sessionId)
+    if (!cur) return json(null, 200)
     return new Response(JSON.stringify(cur), {
       status: 200,
       headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
@@ -1739,16 +1791,11 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
   }
 
   // GET /collab/session/:id/preview/holder — any participant.
-  // Identifies which collab session currently holds the single, container-wide
-  // preview slot, plus who's in that session — so a Driver who hits the
-  // "already running in session X" 409 can see whose Driver to ask to stop it
-  // (rather than just an opaque session id).  DELIBERATELY global: it reports
-  // the holder even when that's a DIFFERENT session than this one (that's the
-  // whole point).  Safe to expose — every collab participant is an org member
-  // (ADR-0001), and the 409 already leaks the holder's session id.  Returns
-  // null when no preview is running anywhere.
+  // Identifies which collab session currently holds a preview slot.
+  // In multi-session mode returns this session's preview; falls back to any
+  // active preview so the 409 "session X already has one" flow still works.
   if (req.method === "GET" && parts[3] === "preview" && parts[4] === "holder") {
-    const cur = Preview.getPreviewState()
+    const cur = Preview.getPreviewState(sessionId) ?? Preview.getPreviewState()
     if (!cur) return json(null, 200)
     const holder = Session.getCollabSession(cur.collabSessionId)
     return json(
@@ -2322,8 +2369,8 @@ function handleSse(
         // FOR THIS session.  Without this, a SPA reload mid-preview would
         // miss the started event and the launcher banner would show the
         // "Launch" button as if nothing were running.
-        const previewState = Preview.getPreviewState()
-        if (previewState && previewState.collabSessionId === collabSessionId) {
+        const previewState = Preview.getPreviewState(collabSessionId)
+        if (previewState) {
           send({ type: "collab:preview_started", state: previewState })
         }
       }

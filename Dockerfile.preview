@@ -1,0 +1,50 @@
+# syntax=docker/dockerfile:1.7
+#
+# Preview ECS task image — Node 20 + pnpm 10 + git credential helper.
+#
+# Each ECS task runs a single frontend dev server (e.g. `pnpm run start`).
+# The collab container proxies to this task's private IP on port 8080.
+# Tasks are ephemeral: the collab server launches one per session on demand
+# and stops it when idle (30 min), session-deleted, or lifetime-capped (2 h).
+#
+# EFS mount at /var/opencode/workspaces/ must be configured in the task
+# definition — same access point as the collab container.
+
+FROM node:20-slim
+
+# System packages: git for fetching private git+https deps, curl for ECS
+# metadata + collab-server registration, openssh-client so git can fork ssh
+# for repos that haven't been rewritten to https yet.
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+        git ca-certificates curl openssh-client && \
+    rm -rf /var/lib/apt/lists/*
+
+# Rewrite ssh-form GitHub URLs to HTTPS — mirrors the main Dockerfile logic
+# so pnpm-lock.yaml git deps resolve correctly here too.
+RUN git config --system --add url."https://github.com/".insteadOf "git@github.com:" && \
+    git config --system --add url."https://github.com/".insteadOf "ssh://git@github.com/" && \
+    git config --system --add url."https://github.com/".insteadOf "git+ssh://git@github.com/" && \
+    git config --system --add url."https://github.com/".insteadOf "https://git@github.com:" && \
+    git config --system --add url."https://github.com/".insteadOf "git+https://git@github.com:"
+
+# GIT_ASKPASS — answers git's credential prompts for private HTTPS fetches.
+# Reads GITHUB_TOKEN injected per-task via ECS container overrides.
+RUN printf '#!/bin/sh\ncase "$1" in\n  Username*) echo x-access-token ;;\n  Password*) echo "$GITHUB_TOKEN" ;;\nesac\n' \
+      > /usr/local/bin/git-askpass-token && \
+    chmod a+rx /usr/local/bin/git-askpass-token
+ENV GIT_ASKPASS=/usr/local/bin/git-askpass-token
+
+# pnpm@10 — matches unleashlive/frontend's lockfile / deploy-cirrus.yml.
+RUN npm install --global pnpm@10 2>&1 | tail -3 && pnpm --version
+
+# Non-root user (uid 10001) — mirrors the collab container.
+RUN useradd -u 10001 -m opencode
+
+# Entrypoint script (Node.js — avoids a bash version dependency).
+COPY scripts/preview-entrypoint.js /usr/local/bin/preview-entrypoint.js
+RUN chmod a+rx /usr/local/bin/preview-entrypoint.js
+
+USER opencode
+
+EXPOSE 8080
+ENTRYPOINT ["node", "/usr/local/bin/preview-entrypoint.js"]
