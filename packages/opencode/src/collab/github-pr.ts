@@ -23,6 +23,7 @@
 import { spawn } from "node:child_process"
 import type { CollabSession, RepoPrResult } from "@opencode-ai/collab"
 import { repoWorkspacePath } from "./workspace"
+import { Database } from "@/storage/db"
 
 /**
  * Push + open a PR for EVERY repo linked to the session.  Repos with no
@@ -116,6 +117,32 @@ export async function openPullRequestForRepo(
     return { repo: repoFull, status: "error", error: `git push failed: ${message}` }
   }
 
+  // Capture commit + LOC stats for the admin dashboard.
+  let commitCount = 0
+  let additions = 0
+  let deletions = 0
+  try {
+    const countOut = await runAsyncCapture(
+      "git",
+      ["-C", repoPath, "rev-list", "--count", `origin/${defaultBranch}..HEAD`],
+      env,
+    )
+    commitCount = parseInt(countOut.trim(), 10) || 0
+
+    const statOut = await runAsyncCapture(
+      "git",
+      ["-C", repoPath, "diff", "--numstat", `origin/${defaultBranch}...HEAD`],
+      env,
+    )
+    for (const line of statOut.trim().split("\n").filter(Boolean)) {
+      const parts = line.split("\t")
+      additions += parseInt(parts[0] ?? "0", 10) || 0
+      deletions += parseInt(parts[1] ?? "0", 10) || 0
+    }
+  } catch {
+    // Non-fatal — admin stats may be missing for this PR but the PR still opens.
+  }
+
   // Compose the PR body from the session state.
   let log = ""
   try {
@@ -198,6 +225,31 @@ export async function openPullRequestForRepo(
   if (!data.html_url) {
     return { repo: repoFull, status: "error", error: "GitHub didn't return an html_url for the new PR." }
   }
+
+  // Persist stats for admin dashboard.
+  try {
+    Database.use((db) => {
+      db.$client
+        .prepare(
+          `INSERT INTO collab_pr_stats
+           (id, collab_session_id, repo_full_name, commits, additions, deletions, pr_url, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          crypto.randomUUID(),
+          collabSession.id,
+          repoFull,
+          commitCount,
+          additions,
+          deletions,
+          data.html_url,
+          Date.now(),
+        )
+    })
+  } catch {
+    // Non-fatal.
+  }
+
   return { repo: repoFull, status: "opened", url: data.html_url }
 }
 

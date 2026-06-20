@@ -53,6 +53,8 @@ export const CollabSessionTable = sqliteTable("collab_session", {
    * unleash-live MCP server with this token + STAGE=cirrus.
    */
   unleash_mcp_token: text(),
+  /** Cumulative milliseconds this session had an active preview. Incremented each time a preview stops. */
+  preview_total_ms: integer().notNull().default(0),
   created_at: integer({ mode: "timestamp_ms" }).notNull(),
   deleted_at: integer({ mode: "timestamp_ms" }),
 })
@@ -181,6 +183,24 @@ export const CollabAuthSessionTable = sqliteTable("collab_auth_session", {
   created_at: integer({ mode: "timestamp_ms" }).notNull(),
   expires_at: integer({ mode: "timestamp_ms" }).notNull(),
 })
+
+/** Per-PR commit + LOC stats captured at push time (one row per repo per PR click). */
+export const CollabPrStatsTable = sqliteTable(
+  "collab_pr_stats",
+  {
+    id: text().primaryKey(),
+    collab_session_id: text()
+      .notNull()
+      .references(() => CollabSessionTable.id, { onDelete: "cascade" }),
+    repo_full_name: text().notNull(),
+    commits: integer().notNull().default(0),
+    additions: integer().notNull().default(0),
+    deletions: integer().notNull().default(0),
+    pr_url: text(),
+    created_at: integer({ mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [index("collab_pr_stats_session_idx").on(t.collab_session_id)],
+)
 
 export const CollabInviteTable = sqliteTable("collab_invite", {
   token: text().primaryKey(),

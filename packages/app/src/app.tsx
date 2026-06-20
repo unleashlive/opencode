@@ -51,6 +51,7 @@ const loadSession = () => import("@/pages/session")
 const Session = lazy(loadSession)
 const CollabNew = lazy(() => import("@/pages/collab/new"))
 const CollabSession = lazy(() => import("@/pages/collab/session"))
+const CollabAdmin = lazy(() => import("@/pages/collab/admin"))
 const Loading = () => <div class="size-full" />
 
 if (typeof location === "object" && /\/session(?:\/|$)/.test(location.pathname)) {
@@ -335,6 +336,7 @@ export function AppInterface(props: {
                 >
                   <Route path="/" component={HomeRoute} />
                   <Route path="/collab/new" component={CollabNew} />
+                  <Route path="/collab/admin" component={CollabAdmin} />
                   <Route path="/collab/:id" component={CollabSession} />
                   <Route path="/:dir" component={DirectoryLayout}>
                     <Route path="/" component={SessionIndexRoute} />

@@ -39,6 +39,7 @@ import { join } from "path"
 import { repoWorkspacePath } from "./workspace"
 import { previewUrl } from "./preview-host"
 import type { CollabEvent } from "@opencode-ai/collab"
+import { Database } from "@/storage/db"
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
@@ -667,6 +668,18 @@ export function stopPreview(reason: string = "explicit"): void {
   const { child, collabSessionId } = active
   const sessionId = collabSessionId
 
+  // Accumulate runtime for admin dashboard before clearing state.
+  const runtimeMs = Date.now() - active.startedAt
+  try {
+    Database.use((db) => {
+      db.$client
+        .prepare("UPDATE collab_session SET preview_total_ms = preview_total_ms + ? WHERE id = ?")
+        .run(runtimeMs, collabSessionId)
+    })
+  } catch {
+    // Non-fatal.
+  }
+
   // Signal the whole process group — sh → pnpm → node — not just the
   // top-level shell.  `detached: true` in spawn() guarantees pgid ===
   // child.pid.  Negative pid syntax on process.kill targets the group.
@@ -1248,4 +1261,32 @@ export async function resumePreviewsOnBoot(): Promise<void> {
   console.log(
     `[collab.preview] resumePreviewsOnBoot: successfully re-spawned preview for session=${pick.collabSessionId} on port ${result.state.port}`,
   )
+}
+
+// ── Admin stats ────────────────────────────────────────────────────────────
+
+export interface AdminPreviewEntry {
+  sessionId: string
+  repoFullName: string
+  startedAt: number
+  status: string
+}
+
+/** Returns a snapshot of the currently active preview (for /collab/admin/stats). */
+export function getAdminPreviewStats(): {
+  activeCount: number
+  activePreviews: AdminPreviewEntry[]
+} {
+  if (!active) return { activeCount: 0, activePreviews: [] }
+  return {
+    activeCount: 1,
+    activePreviews: [
+      {
+        sessionId: active.collabSessionId,
+        repoFullName: active.repoFullName,
+        startedAt: active.startedAt,
+        status: active.status,
+      },
+    ],
+  }
 }
