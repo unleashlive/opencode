@@ -26,8 +26,22 @@ import { connect as tlsConnect } from "node:tls"
 import type { IncomingMessage } from "node:http"
 import type { Socket } from "node:net"
 import { lookupCookieIdentityFromHeaders } from "./cookie-auth"
-import { getActiveUpstreamScheme, getActivePreviewPort, getActiveServePath } from "./preview-launcher"
+import { getActiveUpstreamScheme, getActivePreviewPort, getActiveServePath, getPreviewPrivateIp } from "./preview-launcher"
 import { previewHost } from "./preview-host"
+
+function parseCookies(cookieHeader: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const part of cookieHeader.split(";")) {
+    const idx = part.indexOf("=")
+    if (idx < 0) continue
+    const key = part.slice(0, idx).trim()
+    const val = part.slice(idx + 1).trim()
+    if (key) {
+      try { out[key] = decodeURIComponent(val) } catch { out[key] = val }
+    }
+  }
+  return out
+}
 
 const PREVIEW_PREFIX = "/preview/"
 
@@ -147,22 +161,29 @@ function upstreamHostHeader(port: number): string {
  * is no MITM surface to defend against, and chained cert verification
  * against an IP literal isn't possible anyway.
  */
-export async function handlePreviewHttp(req: Request, port: number, rest: string): Promise<Response> {
+export interface PreviewUpstreamOpts {
+  /** Private IP of the ECS task.  When provided, used instead of 127.0.0.1. */
+  upstreamIp?: string
+  /** Upstream transport scheme override (skip port-based lookup). */
+  upstreamScheme?: "http" | "https"
+  /** Upstream serve-path prefix override (skip port-based lookup). */
+  servePath?: string | null
+  /** Session ID used for scheme/servePath lookup (skips port scan). */
+  sessionId?: string
+}
+
+export async function handlePreviewHttp(
+  req: Request,
+  port: number,
+  rest: string,
+  opts?: PreviewUpstreamOpts,
+): Promise<Response> {
   const url = new URL(req.url)
-  const scheme = getActiveUpstreamScheme(port)
-  // Path to send to the upstream dev server.
-  //
-  //   - servePath is null (default)  → forward the stripped `rest` (legacy
-  //     behavior; dev server listens at "/" and sees /main.js, /chunk-X.js).
-  //   - servePath is a string        → prepend it to `rest`, so the dev
-  //     server receives e.g. /preview/main.js (matches an Angular CLI
-  //     dev-server whose baseHref-derived servePath is "/preview/").
-  //
-  // `rest` always starts with "/" (parsePreviewPath guarantees) so the
-  // simple concat works without double-slashing.
-  const servePath = getActiveServePath(port)
+  const scheme = opts?.upstreamScheme ?? getActiveUpstreamScheme(port, opts?.sessionId)
+  const servePath = opts?.servePath !== undefined ? opts.servePath : getActiveServePath(port, opts?.sessionId)
   const upstreamPath = servePath ? servePath.replace(/\/$/, "") + rest : rest
-  const target = `${scheme}://${PREVIEW_UPSTREAM_TCP_HOST}:${port}${upstreamPath}${url.search}`
+  const upstreamHost = opts?.upstreamIp ?? PREVIEW_UPSTREAM_TCP_HOST
+  const target = `${scheme}://${upstreamHost}:${port}${upstreamPath}${url.search}`
 
   // Log every request so CloudWatch shows the full proxy attempt history.
   // Volume is bounded by `/preview/<port>/*` traffic, which is itself idle-
@@ -279,19 +300,11 @@ export async function handlePreviewHttp(req: Request, port: number, rest: string
     // stack trace if `err` is an Error — usually it's a TypeError("fetch
     // failed") wrapping a transport error in `.cause`.
     console.error(
-      `[collab.preview-proxy] upstream ${scheme}://${PREVIEW_UPSTREAM_TCP_HOST}:${port}${rest} failed: ${detail}`,
+      `[collab.preview-proxy] upstream ${scheme}://${upstreamHost}:${port}${rest} failed: ${detail}`,
       err instanceof Error && (err as Error & { cause?: unknown }).cause
         ? `cause: ${String((err as Error & { cause?: unknown }).cause)}`
         : "",
     )
-    // Hint at scheme mismatch — common 502 cause once HTTPS-upstream support
-    // exists.  Two cases:
-    //   - Proxy is configured "http" (default) but the dev server bound TLS
-    //     → the byte-level "Unable to connect" / EPROTO from TLS handshake
-    //       failure surfaces as a 502 here.  Set `upstreamScheme: "https"`.
-    //   - Proxy is configured "https" but the dev server is plain HTTP
-    //     → similar shape, opposite direction.  Drop `upstreamScheme` or
-    //       set it to "http".
     const schemeHint =
       scheme === "https"
         ? `<p><em>Proxy is configured to speak HTTPS to the upstream.  If the dev server is actually plain HTTP, drop <code>"upstreamScheme"</code> from <code>.opencode-preview.json</code> (or set it to <code>"http"</code>).</em></p>`
@@ -300,7 +313,7 @@ export async function handlePreviewHttp(req: Request, port: number, rest: string
       `<!doctype html><meta charset="utf-8"><title>Preview unavailable</title>` +
         `<div style="font-family:system-ui;margin:3rem auto;max-width:560px;line-height:1.5">` +
         `<h1 style="margin:0 0 .5rem 0">Preview unavailable</h1>` +
-        `<p>Couldn't reach <code>${scheme}://${PREVIEW_UPSTREAM_TCP_HOST}:${port}</code> from inside the workspace container.</p>` +
+        `<p>Couldn't reach <code>${scheme}://${upstreamHost}:${port}</code> from inside the workspace container.</p>` +
         `<p>Is a dev server actually listening on port ${port}?  In the iframe terminal:</p>` +
         `<pre style="background:#111;color:#eee;padding:.75rem;border-radius:6px">ss -lntp | grep ${port}</pre>` +
         `<p>If the dev server is up but this still 502s, check that it's bound to <code>0.0.0.0</code> (or <code>127.0.0.1</code>) rather than an external interface.  Vite/Webpack default to localhost-only, which is fine; <code>--host 0.0.0.0</code> works too.</p>` +
@@ -336,9 +349,16 @@ export function attachPreviewUpgrade(server: {
     //     dev / fallback when no preview host is configured).
     const reqHost = ((req.headers["host"] as string | undefined) ?? "").toLowerCase().split(":")[0]
     const ph = previewHost()
+    // Read preview_sid cookie early so we can use it for host-based port lookup.
+    const wsCookieHeader = (req.headers["cookie"] as string | undefined) ?? ""
+    const wsPreviewSid = parseCookies(wsCookieHeader)["preview_sid"] ?? null
     let parsed: { port: number; rest: string } | null
     if (ph && reqHost === ph) {
-      const activePort = getActivePreviewPort()
+      // Host-based: use the session from the preview_sid cookie (ECS mode) or
+      // fall back to the first active port (process mode / no cookie).
+      const activePort = wsPreviewSid
+        ? getActivePreviewPort(wsPreviewSid)
+        : getActivePreviewPort()
       parsed = activePort === null ? null : { port: activePort, rest: pathname || "/" }
     } else {
       parsed = parsePreviewPath(pathname)
@@ -350,11 +370,7 @@ export function attachPreviewUpgrade(server: {
     }
 
     // Authenticate the WebSocket upgrade BEFORE the handshake completes.
-    // The browser sees a clean 403 (vs a successful WS that immediately
-    // closes with code 1008) and we never touch the WS framing layer for
-    // unauthorised callers.  Cookie-only check — see ADR-0001; v1 doesn't
-    // bind port to a specific session.
-    const cookieHeader = (req.headers["cookie"] as string | undefined) ?? ""
+    const cookieHeader = wsCookieHeader
     if (!lookupCookieIdentityFromHeaders(cookieHeader)) {
       try {
         clientSocket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n")
@@ -363,41 +379,30 @@ export function attachPreviewUpgrade(server: {
       return
     }
 
-    // Connect to the loopback dev server.  Plain TCP for the default
-    // "http" upstream, TLS for the opt-in "https" upstream (Angular CLI
-    // --ssl etc.).  Both `netConnect` and `tlsConnect` return a Duplex
-    // with identical .write / .on('data') / .pipe() surface, so the rest
-    // of this handler (the handshake-write below + the bidirectional
-    // pipe at the bottom) doesn't need to branch.
-    //
-    // `rejectUnauthorized: false` for TLS: we're connecting to literal
-    // 127.0.0.1 inside the same container — no MITM surface to defend
-    // against, and chain validation against an IP literal is impossible
-    // anyway.  See `handlePreviewHttp`'s tls option for the matching
-    // rationale on the HTTP path.
-    const upstreamScheme = getActiveUpstreamScheme(parsed.port)
-    // Mirror the HTTP path's keep-prefix logic: when the active preview
-    // declared a `servePath`, the dev server's WS endpoint also lives
-    // under that prefix (Angular's @vite/client connects to
-    // /preview/@vite/client, not /@vite/client).  Prepend servePath to
-    // the stripped `rest` to satisfy the dev server's routing.
-    const upstreamServePath = getActiveServePath(parsed.port)
+    // Resolve which ECS task (or loopback) this WebSocket should connect to.
+    // In ECS mode, the preview_sid cookie identifies the session, and the
+    // session's registered private IP is the TCP target.  In process mode
+    // (or when no session cookie is present), fall back to 127.0.0.1.
+    const previewSid = wsPreviewSid
+    const upstreamIp = previewSid ? (getPreviewPrivateIp(previewSid) ?? "127.0.0.1") : "127.0.0.1"
+    const upstreamScheme = getActiveUpstreamScheme(parsed.port, previewSid ?? undefined)
+    const upstreamServePath = getActiveServePath(parsed.port, previewSid ?? undefined)
     const wsUpstreamPath = upstreamServePath
       ? upstreamServePath.replace(/\/$/, "") + (parsed.rest || "/")
       : (parsed.rest || "/")
     console.log(
-      `[collab.preview-proxy] WS upgrade ${pathname} → ${upstreamScheme}://127.0.0.1:${parsed.port}${wsUpstreamPath}`,
+      `[collab.preview-proxy] WS upgrade ${pathname} → ${upstreamScheme}://${upstreamIp}:${parsed.port}${wsUpstreamPath}`,
     )
     const upstreamSocket: Socket =
       upstreamScheme === "https"
-        ? (tlsConnect({ host: "127.0.0.1", port: parsed.port, rejectUnauthorized: false }) as unknown as Socket)
-        : netConnect({ host: "127.0.0.1", port: parsed.port })
+        ? (tlsConnect({ host: upstreamIp, port: parsed.port, rejectUnauthorized: false }) as unknown as Socket)
+        : netConnect({ host: upstreamIp, port: parsed.port })
 
     const cleanup = (err?: Error) => {
       if (err) {
         console.error(
           `[collab.preview-proxy] WS upgrade upstream error ` +
-            `${upstreamScheme}://127.0.0.1:${parsed.port}: ${err.message}`,
+            `${upstreamScheme}://${upstreamIp}:${parsed.port}: ${err.message}`,
         )
         try {
           clientSocket.write(

@@ -1,9 +1,9 @@
 import "./init-projectors"
 
 import { handleCollabRequest } from "@/collab/router"
-import { parsePreviewPath, handlePreviewHttp, attachPreviewUpgrade } from "@/collab/preview-router"
+import { parsePreviewPath, handlePreviewHttp, attachPreviewUpgrade, type PreviewUpstreamOpts } from "@/collab/preview-router"
 import { cookieAuthorizesRequest, lookupCookieIdentity } from "@/collab/cookie-auth"
-import { markPreviewTraffic, getActivePreviewPort } from "@/collab/preview-launcher"
+import { markPreviewTraffic, getActivePreviewPort, getPreviewPrivateIp, getActiveUpstreamScheme, getActiveServePath } from "@/collab/preview-launcher"
 import { previewHost } from "@/collab/preview-host"
 import { Database } from "@/storage/db"
 import { NodeHttpServer } from "@effect/platform-node"
@@ -60,6 +60,20 @@ const NO_PREVIEW_HTML =
  * large downloads, SSE all work).  Shared by the dedicated-preview-host
  * branch and the legacy `/preview/` path branch.
  */
+function parseCookieHeader(cookieHeader: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const part of cookieHeader.split(";")) {
+    const idx = part.indexOf("=")
+    if (idx < 0) continue
+    const key = part.slice(0, idx).trim()
+    const val = part.slice(idx + 1).trim()
+    if (key) {
+      try { out[key] = decodeURIComponent(val) } catch { out[key] = val }
+    }
+  }
+  return out
+}
+
 function previewServerResponse(webResponse: Response) {
   const previewHeaders = new Headers(webResponse.headers)
   if (webResponse.body) {
@@ -104,27 +118,60 @@ const collabMiddleware: HttpMiddleware.HttpMiddleware = (app) =>
     const ph = previewHost()
     if (ph && host === ph) {
       const webRequest = yield* HttpServerRequest.toWeb(req)
-      // Same shell-trust gate as the legacy path (ADR-0001): a valid collab
-      // cookie is enough.  cookieAuthorizesRequest now allows when the Host
-      // is the preview host (see cookie-auth.ts rule a0).
       if (cookieAuthorizesRequest(webRequest) !== "allow") {
         return HttpServerResponse.raw(new TextEncoder().encode("Forbidden"), {
           status: 403,
           headers: new Headers({ "content-type": "text/plain" }),
         })
       }
-      markPreviewTraffic()
-      const port = getActivePreviewPort()
+
+      // Session routing: the SPA appends ?cs=<sessionId> on first load.
+      // We read it, set a preview_sid cookie (so subsequent requests are
+      // routed to the same ECS task without repeating the query param),
+      // then route to the session's private IP.
+      const reqUrl = new URL(webRequest.url)
+      const csFromQuery = reqUrl.searchParams.get("cs")
+      const existingPreviewSid = parseCookieHeader(webRequest.headers.get("cookie") ?? "")["preview_sid"] ?? null
+      const previewSid = csFromQuery ?? existingPreviewSid
+
+      markPreviewTraffic(previewSid ?? undefined)
+
+      const port = previewSid ? (getActivePreviewPort(previewSid) ?? null) : getActivePreviewPort()
       if (port === null) {
         return HttpServerResponse.raw(new TextEncoder().encode(NO_PREVIEW_HTML), {
           status: 200,
           headers: new Headers({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store" }),
         })
       }
-      // Root serve: forward the WHOLE pathname (servePath is null now that the
-      // frontend builds at base href "/"), so /assets/x.js → /assets/x.js.
-      const webResponse = yield* Effect.promise(() => handlePreviewHttp(webRequest, port, pathname || "/"))
-      return previewServerResponse(webResponse)
+
+      const upstreamOpts: PreviewUpstreamOpts = previewSid
+        ? {
+            upstreamIp: getPreviewPrivateIp(previewSid) ?? undefined,
+            upstreamScheme: getActiveUpstreamScheme(port, previewSid),
+            servePath: getActiveServePath(port, previewSid),
+            sessionId: previewSid,
+          }
+        : {}
+
+      const webResponse = yield* Effect.promise(() =>
+        handlePreviewHttp(webRequest, port, pathname || "/", upstreamOpts),
+      )
+      const effectResponse = previewServerResponse(webResponse)
+
+      // When ?cs was in the query string, set the preview_sid cookie on the
+      // response so subsequent navigations route to the same ECS task without
+      // requiring the query param every time.  Session-scoped (no MaxAge) so
+      // it expires when the browser tab closes.
+      if (csFromQuery) {
+        const collabDomain = process.env["COLLAB_DOMAIN"]?.trim().toLowerCase().split(":")[0]
+        const domainAttr = collabDomain ? `Domain=.${collabDomain}; ` : ""
+        return HttpServerResponse.setHeader(
+          effectResponse,
+          "set-cookie",
+          `preview_sid=${encodeURIComponent(csFromQuery)}; ${domainAttr}Path=/; SameSite=Lax`,
+        )
+      }
+      return effectResponse
     }
 
     // GET / and GET /collab — collab landing.  Authenticated users are
@@ -208,7 +255,8 @@ const collabMiddleware: HttpMiddleware.HttpMiddleware = (app) =>
       pathname === "/collab/session" ||
       pathname.startsWith("/collab/session/") ||
       pathname === "/collab/claude-creds" ||
-      pathname === "/collab/claude-creds/status"
+      pathname === "/collab/claude-creds/status" ||
+      pathname.startsWith("/collab/preview-task/")
     if (!isCollabApi) return yield* app
 
     // toWeb converts Effect's HttpServerRequest → standard Web API Request (body included)
