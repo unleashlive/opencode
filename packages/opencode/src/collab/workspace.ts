@@ -159,9 +159,19 @@ export async function initSessionWorkspace(
     }
 
     // Drop the participants list next to the hook so the hook can read it
-    // at commit time.  Refreshed by refreshParticipantsFile whenever the
-    // participant list changes (invite redemption, role change, leave).
-    writeParticipantsFile(dest, participants)
+    // at commit time.  Re-read from session state here rather than using the
+    // snapshot passed in — catches anyone who joined while the clone was in
+    // flight (the in-memory session is updated in real-time by the invite
+    // redemption path, even during cloning).
+    let currentParticipants = participants
+    try {
+      const { getCollabSession } = await import("./session")
+      const cs = getCollabSession(collabSessionId)
+      if (cs) currentParticipants = cs.participants
+    } catch {
+      // non-fatal: fall back to the snapshot
+    }
+    writeParticipantsFile(dest, currentParticipants)
 
     // (Re)install the collab commit hook every time — covers fresh clones
     // and existing checkouts that pre-date the feature.
@@ -191,8 +201,10 @@ function pickCommitAuthor(participants: Participant[]): { name: string; email: s
  * the prepare-commit-msg hook can read it at commit time.  Atomic via
  * tmpfile + rename so a racing commit doesn't see a half-written file.
  *
- * Format: `[{ "id": 123, "login": "alice" }, …]` — minimal because the hook
- * only needs id + login to construct the no-reply email.
+ * Only drivers and contributors are written — viewers read along but are not
+ * credited as co-authors on commits.
+ *
+ * Format: `[{ "id": 123, "login": "alice", "role": "driver" }, …]`
  */
 function writeParticipantsFile(repoPath: string, participants: Participant[]): void {
   const gitDir = join(repoPath, ".git")
@@ -200,7 +212,9 @@ function writeParticipantsFile(repoPath: string, participants: Participant[]): v
   const target = join(gitDir, "collab-participants.json")
   const tmp = target + ".tmp"
   const payload = JSON.stringify(
-    participants.map((p) => ({ id: p.githubId, login: p.githubLogin })),
+    participants
+      .filter((p) => p.role === "driver" || p.role === "contributor")
+      .map((p) => ({ id: p.githubId, login: p.githubLogin, role: p.role })),
   )
   try {
     writeFileSync(tmp, payload, { mode: 0o644 })
@@ -386,6 +400,13 @@ export async function reinstallCollabHooksOnBoot(): Promise<void> {
         continue
       }
       try {
+        // Refresh the participants file alongside the hook — the boot sweep
+        // previously only reinstalled the hook script, leaving a stale
+        // participants list on disk after a container restart.  Without this,
+        // any participant who joined after the last explicit refresh (invite /
+        // role change) would be missing from Co-authored-by trailers on all
+        // subsequent commits.
+        writeParticipantsFile(dest, cs.participants ?? [])
         installCollabCommitHook(dest, cs.id, cs.name ?? "", repo, cs.branch ?? null)
         installed++
       } catch (err) {
