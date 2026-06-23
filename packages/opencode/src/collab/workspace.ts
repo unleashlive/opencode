@@ -9,10 +9,10 @@
  * (configurable via COLLAB_WORKSPACE_ROOT env var)
  */
 
-import { spawn } from "child_process"
+import { spawn, spawnSync } from "child_process"
 import { mkdirSync, rmSync, existsSync, writeFileSync, renameSync, readdirSync, statSync, unlinkSync } from "fs"
 import { rm as rmAsync, stat as statAsync } from "fs/promises"
-import { join } from "path"
+import { join, isAbsolute } from "path"
 import type { Participant } from "@opencode-ai/collab"
 
 /** Run a command asynchronously and resolve/reject when it exits. */
@@ -662,11 +662,64 @@ case "$COMMIT_SOURCE" in
 esac
 `
 
-  const hookPath = join(hooksDir, "prepare-commit-msg")
   try {
-    writeFileSync(hookPath, script, { mode: 0o755 })
+    writeFileSync(join(hooksDir, "prepare-commit-msg"), script, { mode: 0o755 })
   } catch (err) {
     console.error("[collab] failed to install commit hook for", repoPath, err)
+    return
+  }
+
+  // CRITICAL: husky (run by `bun/pnpm install` during preview launch and by
+  // many repos' `prepare` script) sets `core.hooksPath=.husky/_`.  When that
+  // config is set, git IGNORES `.git/hooks/` entirely — so the collab hook we
+  // just wrote never fires and commits go out with no Co-authored-by trailers.
+  // This was the silent attribution bug.
+  //
+  // Fix: point `core.hooksPath` back at our `.git/hooks` so OUR
+  // prepare-commit-msg always runs.  Re-asserted on every install path (clone,
+  // boot sweep, SSE-connect refresh), so even if a later `husky install` flips
+  // it back, the next refresh restores it.
+  //
+  // We deliberately DON'T preserve husky's own hooks: husky's scripts are thin
+  // wrappers that source husky's runtime (`.husky/_/h`) and only work when run
+  // from husky's dir — copying them into `.git/hooks` makes them fail with
+  // "cannot open .git/hooks/h".  Inside a server-side collab clone, husky's
+  // dev-time linting hooks aren't needed; correct commit attribution is the
+  // priority.
+  ensureCollabHooksPath(repoPath, hooksDir)
+}
+
+/**
+ * Force git to use the collab hooks dir (`.git/hooks`) for this repo, undoing
+ * any `core.hooksPath` redirection husky installed.
+ *
+ * Synchronous + best-effort: a git/config failure logs but never throws (we'd
+ * rather have a working clone than crash session init over a hook tweak).
+ */
+function ensureCollabHooksPath(repoPath: string, hooksDir: string): void {
+  const current = spawnSync("git", ["-C", repoPath, "config", "--local", "--get", "core.hooksPath"], {
+    encoding: "utf8",
+  })
+  const hooksPath = current.status === 0 ? current.stdout.trim() : ""
+
+  // Unset → git defaults to .git/hooks, which is exactly what we want.
+  if (!hooksPath) return
+
+  // Already resolves to our .git/hooks → nothing to do.
+  const resolved = isAbsolute(hooksPath) ? hooksPath : join(repoPath, hooksPath)
+  if (resolved === hooksDir) return
+
+  // Point git at our hooks dir using an absolute path so it survives regardless
+  // of the cwd git is invoked from.
+  const set = spawnSync("git", ["-C", repoPath, "config", "--local", "core.hooksPath", hooksDir], {
+    encoding: "utf8",
+  })
+  if (set.status !== 0) {
+    console.error(
+      "[collab] failed to reset core.hooksPath for",
+      repoPath,
+      set.stderr?.trim() || `git exited ${set.status}`,
+    )
   }
 }
 
