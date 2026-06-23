@@ -165,6 +165,10 @@ export type RepoPrResult = { repo: string } & (
 export type CollabEvent =
   | { type: "collab:participant_joined"; participant: Participant }
   | { type: "collab:participant_left"; githubLogin: string }
+  /** A driver permanently removed a participant from the session.  Distinct
+   *  from `participant_left` (which only flips isOnline): the participant
+   *  should be dropped from the roster entirely on every client. */
+  | { type: "collab:participant_removed"; githubId: number; githubLogin: string }
   | { type: "collab:role_changed"; githubLogin: string; role: CollabRole }
   | { type: "collab:prompt_submitted"; suggestion: PromptSuggestion; queuePosition: number }
   | { type: "collab:prompt_suggestion"; suggestion: PromptSuggestion }

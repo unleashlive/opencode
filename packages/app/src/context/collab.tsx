@@ -51,6 +51,11 @@ interface CollabContextValue {
   react: (suggestionId: string, emoji: string) => Promise<void>
   resolvePool: () => Promise<void>
   changeRole: (githubId: number, role: string) => Promise<void>
+  /** Driver-only: permanently remove a participant from the session. */
+  removeParticipant: (githubId: number) => Promise<void>
+  /** GitHub id of the local user, or null until auth/session data loads.  Used
+   *  to gate self-targeting UI (you can't remove yourself). */
+  meGithubId: () => number | null
   createInvite: (role: string) => Promise<{ url: string; token: string }>
   /** Driver-only: git push + open one GitHub PR per linked repo (repos with no
    *  commits on the collab branch are skipped).  One result row per repo. */
@@ -470,6 +475,23 @@ export function CollabProvider(props: CollabProviderProps) {
         })
         break
 
+      case "collab:participant_removed":
+        // A driver removed someone.  If it's us, the session is no longer ours
+        // to view — bounce to the collab landing page.  Otherwise just drop the
+        // user from the local roster.
+        if (props.meGithubId != null && event.githubId === props.meGithubId) {
+          setSession(null)
+          if (typeof window !== "undefined") window.location.href = "/collab"
+          break
+        }
+        markTyping(event.githubLogin, false)
+        setSession((prev) =>
+          prev
+            ? { ...prev, participants: prev.participants.filter((p) => p.githubId !== event.githubId) }
+            : prev,
+        )
+        break
+
       case "collab:queue_update":
         setQueue(event.queue)
         break
@@ -700,6 +722,10 @@ export function CollabProvider(props: CollabProviderProps) {
     async changeRole(githubId, role) {
       await api(`/participant/${githubId}/role`, "PUT", { role })
     },
+    async removeParticipant(githubId) {
+      await api(`/participant/${githubId}`, "DELETE")
+    },
+    meGithubId: () => props.meGithubId ?? null,
     async createInvite(role) {
       const res = await api("/invite", "POST", { role })
       return res.json()

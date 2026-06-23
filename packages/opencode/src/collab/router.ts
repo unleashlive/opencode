@@ -2135,6 +2135,39 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
     return json({ ok: true })
   }
 
+  // DELETE /collab/session/:id/participant/:ghId — Driver removes a participant
+  if (req.method === "DELETE" && parts[3] === "participant" && parts.length === 5) {
+    if (caller.role !== "driver") return json({ error: "Forbidden — Drivers only" }, 403)
+    const targetGhId = Number(parts[4])
+    if (!Number.isFinite(targetGhId)) return json({ error: "Invalid participant id" }, 400)
+
+    const target = collabSession.participants.find((p) => p.githubId === targetGhId)
+    if (!target) return json({ error: "Participant not found" }, 404)
+
+    // Guard: a driver can't remove themselves (use "leave" semantics for that),
+    // and the session owner can never be removed (they anchor the workspace
+    // git author identity and own the session lifecycle).
+    if (targetGhId === caller.githubId) return json({ error: "You cannot remove yourself" }, 400)
+    if (targetGhId === collabSession.ownerGithubId)
+      return json({ error: "The session owner cannot be removed" }, 400)
+
+    Participant.removeParticipant(sessionId, targetGhId)
+
+    // Tell every client to drop the user from the roster.  The removed user's
+    // own client receives this too and should leave the session UI; any further
+    // API call from them now 403s at the participant gate above.
+    broadcastSse(sessionId, {
+      type: "collab:participant_removed",
+      githubId: targetGhId,
+      githubLogin: target.githubLogin,
+    })
+
+    // Refresh the per-repo participants file so the removed user is no longer
+    // credited as a co-author on subsequent commits.
+    refreshParticipantsFileForSession(sessionId)
+    return json({ ok: true })
+  }
+
   // GET /collab/session/:id/events — SSE stream
   if (req.method === "GET" && parts[3] === "events") {
     return handleSse(req, sessionId, sess)
@@ -2222,6 +2255,16 @@ function handleSse(
   // own `send` will buffer the event and flush it once the stream opens.
   const collabSession = Session.getCollabSession(collabSessionId)
   if (collabSession) {
+    // Self-heal the on-disk participants file for pre-existing sessions.  The
+    // PR #70 fix (filter viewers, add role, refresh on boot) only reaches a
+    // running session when the ECS task is replaced — a long-lived container
+    // keeps committing with the stale file written at clone time.  Every active
+    // participant holds an SSE stream that reconnects periodically, so
+    // refreshing here propagates the fix to all live sessions within minutes of
+    // deploy, no restart required.  Cheap + idempotent (one tiny atomic write
+    // per repo); silently no-ops for sessions whose workspace isn't cloned yet.
+    refreshParticipantsFileForSession(collabSessionId)
+
     Participant.setOnline(collabSessionId, sess.githubId, true)
     const participant = collabSession.participants.find((p) => p.githubId === sess.githubId)
     if (participant) {

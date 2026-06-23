@@ -27,6 +27,28 @@ export function addParticipant(
   return { ...participant, isOnline: false, joinedAt: new Date(now) }
 }
 
+/**
+ * Permanently remove a participant from a collab session.  Used by the
+ * driver-only "remove user" control (DELETE /participant/:ghId).  Hard delete:
+ * the row is gone, so the user disappears from the roster and — once the
+ * per-repo participants file is refreshed by the caller — from future
+ * `Co-authored-by` trailers.  They can rejoin later via a fresh invite.
+ *
+ * Idempotent: removing an already-absent participant affects zero rows.
+ */
+export function removeParticipant(collabSessionId: string, githubId: number): void {
+  Database.use((db) => {
+    db.delete(CollabParticipantTable)
+      .where(
+        and(
+          eq(CollabParticipantTable.collab_session_id, collabSessionId),
+          eq(CollabParticipantTable.github_id, githubId),
+        ),
+      )
+      .run()
+  })
+}
+
 export function changeRole(collabSessionId: string, githubId: number, role: CollabRole): void {
   Database.use((db) => {
     db.update(CollabParticipantTable)
