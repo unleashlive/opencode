@@ -15,6 +15,7 @@ import { Glob } from "@opencode-ai/core/util/glob"
 import * as Log from "@opencode-ai/core/util/log"
 import { Discovery } from "./discovery"
 import CUSTOMIZE_OPENCODE_SKILL_BODY from "./prompt/customize-opencode.md" with { type: "text" }
+import GRAPHIFY_SKILL_BODY from "./prompt/graphify.md" with { type: "text" }
 import { isRecord } from "@/util/record"
 
 const log = Log.create({ service: "skill" })
@@ -32,6 +33,14 @@ const SKILL_PATTERN = "**/SKILL.md"
 const CUSTOMIZE_OPENCODE_SKILL_NAME = "customize-opencode"
 const CUSTOMIZE_OPENCODE_SKILL_DESCRIPTION =
   "Use ONLY when the user is editing or creating opencode's own configuration: opencode.json, opencode.jsonc, files under .opencode/, or files under ~/.config/opencode/. Also use when creating or fixing opencode agents, subagents, skills, plugins, MCP servers, or permission rules. Do not use for the user's own application code, or for any project that is not configuring opencode itself."
+
+// Built-in skill exposing the Graphify knowledge graph. This fork auto-builds a
+// code-only graph for every git repo opened through opencode, so the model
+// should prefer scoped graph queries over grepping/reading many files when
+// answering questions about how the codebase fits together.
+const GRAPHIFY_SKILL_NAME = "graphify"
+const GRAPHIFY_SKILL_DESCRIPTION =
+  "Use when answering questions about how a codebase fits together — where something is handled, what connects two things, what calls what, overall architecture, or change impact. This fork auto-builds a Graphify knowledge graph (graphify-out/) for each repo; prefer `graphify query`/`path`/`explain` over grepping or reading many files. Skip only for exact needle lookups or when graphify-out/graph.json is absent."
 
 export const Info = Schema.Struct({
   name: Schema.String,
@@ -266,6 +275,12 @@ export const layer = Layer.effect(
           description: CUSTOMIZE_OPENCODE_SKILL_DESCRIPTION,
           location: "<built-in>",
           content: CUSTOMIZE_OPENCODE_SKILL_BODY,
+        }
+        s.skills[GRAPHIFY_SKILL_NAME] = {
+          name: GRAPHIFY_SKILL_NAME,
+          description: GRAPHIFY_SKILL_DESCRIPTION,
+          location: "<built-in>",
+          content: GRAPHIFY_SKILL_BODY,
         }
         yield* loadSkills(s, yield* InstanceState.get(discovered), bus)
         return s
