@@ -860,6 +860,13 @@ function handleCollabRequestInner(req: Request): Promise<Response> | Response {
     return handleInviteRedeem(req, token)
   }
 
+  // GET /collab/admin/stats — usage dashboard (any authenticated org member)
+  if (req.method === "GET" && path === "/collab/admin/stats") {
+    const sess = getSession(req)
+    if (!sess) return json({ error: "Unauthorised — please authenticate via /collab/auth/github" }, 401)
+    return handleAdminStats()
+  }
+
   // GET /collab/repos — list org repos (auth required, no session needed)
   if (req.method === "GET" && path === "/collab/repos") {
     const sess = getSession(req)
@@ -951,6 +958,134 @@ function handleCollabRequestInner(req: Request): Promise<Response> | Response {
  * state with a cookie of the same value for CSRF protection (the attacker
  * has the URL state but can't forge the cookie).
  */
+// ── Admin stats ───────────────────────────────────────────────────────────────
+
+function handleAdminStats(): Response {
+  const stats = Database.use((db) => {
+    const users = db.$client
+      .prepare(
+        `SELECT p.github_id, p.github_login, p.github_avatar_url,
+                MAX(p.joined_at) as last_seen_at,
+                COUNT(DISTINCT p.collab_session_id) as session_count,
+                (SELECT COUNT(*) FROM collab_suggestion s WHERE s.author_github_id = p.github_id) as suggestion_count
+         FROM collab_participant p
+         GROUP BY p.github_id
+         ORDER BY last_seen_at DESC`,
+      )
+      .all()
+
+    const sessionStats = db.$client
+      .prepare(
+        `SELECT COUNT(*) as total,
+                SUM(CASE WHEN deleted_at IS NULL AND init_status = 'ready' THEN 1 ELSE 0 END) as active
+         FROM collab_session`,
+      )
+      .get() as { total: number; active: number }
+
+    const recentSessions = db.$client
+      .prepare(
+        `SELECT s.id, s.name, s.owner_github_login, s.created_at,
+                GROUP_CONCAT(r.repo_full_name, ',') as repo_names
+         FROM collab_session s
+         LEFT JOIN collab_repo r ON r.collab_session_id = s.id
+         WHERE s.deleted_at IS NULL
+         GROUP BY s.id
+         ORDER BY s.created_at DESC
+         LIMIT 20`,
+      )
+      .all()
+
+    const topRepos = db.$client
+      .prepare(
+        `SELECT r.repo_full_name, COUNT(DISTINCT r.collab_session_id) as session_count
+         FROM collab_repo r
+         JOIN collab_session s ON s.id = r.collab_session_id
+         WHERE s.deleted_at IS NULL
+         GROUP BY r.repo_full_name
+         ORDER BY session_count DESC
+         LIMIT 10`,
+      )
+      .all()
+
+    const llmStats = db.$client
+      .prepare(
+        `SELECT COUNT(*) as total,
+                SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) as approved,
+                SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
+         FROM collab_suggestion`,
+      )
+      .get() as { total: number; approved: number; rejected: number } | null
+
+    const previewTotalMs = db.$client
+      .prepare(`SELECT SUM(preview_total_ms) as total FROM collab_session`)
+      .get() as { total: number | null }
+
+    const crashSessions = db.$client
+      .prepare(
+        `SELECT id, name, preview_crash_count, preview_crash_at
+         FROM collab_session
+         WHERE preview_crash_count > 0
+         ORDER BY preview_crash_at DESC
+         LIMIT 20`,
+      )
+      .all()
+
+    // collab_pr_stats may not exist on very old DBs before this migration ran.
+    let codeStats: unknown[] = []
+    let codeTotal: unknown = null
+    try {
+      codeStats = db.$client
+        .prepare(
+          `SELECT repo_full_name,
+                  SUM(commits) as commits,
+                  SUM(additions) as additions,
+                  SUM(deletions) as deletions
+           FROM collab_pr_stats
+           GROUP BY repo_full_name
+           ORDER BY commits DESC`,
+        )
+        .all()
+      codeTotal = db.$client
+        .prepare(
+          `SELECT SUM(commits) as commits, SUM(additions) as additions, SUM(deletions) as deletions
+           FROM collab_pr_stats`,
+        )
+        .get()
+    } catch {
+      // Table not yet created — migration hasn't run yet.
+    }
+
+    return { users, sessionStats, recentSessions, topRepos, llmStats, previewTotalMs, crashSessions, codeStats, codeTotal }
+  })
+
+  const previewStats = Preview.getAdminPreviewStats()
+
+  return json({
+    serverUptimeSec: Math.floor(process.uptime()),
+    serverStartedAt: Date.now() - Math.floor(process.uptime()) * 1000,
+    users: stats.users,
+    sessions: {
+      total: stats.sessionStats.total,
+      active: stats.sessionStats.active,
+      recent: stats.recentSessions,
+    },
+    topRepos: stats.topRepos,
+    previews: {
+      activeCount: previewStats.activeCount,
+      activePreviews: previewStats.activePreviews,
+      totalRuntimeMs: stats.previewTotalMs.total ?? 0,
+      crashSessions: stats.crashSessions,
+    },
+    llm: stats.llmStats ?? { total: 0, approved: 0, rejected: 0 },
+    code: {
+      total: stats.codeTotal,
+      byRepo: stats.codeStats,
+    },
+  })
+}
+
+// ── OAuth state helpers ───────────────────────────────────────────────────────
+
 interface OAuthStatePayload {
   n: string
   inv?: string

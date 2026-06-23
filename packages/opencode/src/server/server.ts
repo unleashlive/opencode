@@ -208,7 +208,8 @@ const collabMiddleware: HttpMiddleware.HttpMiddleware = (app) =>
       pathname === "/collab/session" ||
       pathname.startsWith("/collab/session/") ||
       pathname === "/collab/claude-creds" ||
-      pathname === "/collab/claude-creds/status"
+      pathname === "/collab/claude-creds/status" ||
+      pathname.startsWith("/collab/admin/")
     if (!isCollabApi) return yield* app
 
     // toWeb converts Effect's HttpServerRequest → standard Web API Request (body included)

@@ -177,6 +177,30 @@ export function runCollabMigrations() {
       db.$client.exec("ALTER TABLE collab_session ADD COLUMN unleash_mcp_token TEXT")
     }
 
+    // preview_total_ms — cumulative preview runtime in milliseconds, accumulated
+    // each time a preview stops.  Used by the admin dashboard.
+    if (!cols.some((c) => c.name === "preview_total_ms")) {
+      db.$client.exec("ALTER TABLE collab_session ADD COLUMN preview_total_ms INTEGER NOT NULL DEFAULT 0")
+    }
+
+    // collab_pr_stats — per-repo commit + LOC stats captured at PR push time.
+    // One row per successful "Open PR" click per repo per session.
+    db.$client.exec(`
+      CREATE TABLE IF NOT EXISTS collab_pr_stats (
+        id TEXT PRIMARY KEY,
+        collab_session_id TEXT NOT NULL REFERENCES collab_session(id) ON DELETE CASCADE,
+        repo_full_name TEXT NOT NULL,
+        commits INTEGER NOT NULL DEFAULT 0,
+        additions INTEGER NOT NULL DEFAULT 0,
+        deletions INTEGER NOT NULL DEFAULT 0,
+        pr_url TEXT,
+        created_at INTEGER NOT NULL
+      )
+    `)
+    db.$client.exec(
+      `CREATE INDEX IF NOT EXISTS collab_pr_stats_session_idx ON collab_pr_stats(collab_session_id)`,
+    )
+
     // Boot sweep: revert mid-flight LLM dispatches back to `approved` so the
     // newly-booted task's queue executor picks them up and re-runs them.  A
     // row sits in `in_flight` ONLY while the previous container had an open
