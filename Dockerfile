@@ -193,6 +193,8 @@ RUN mkdir -p /var/opencode/workspaces \
              /home/opencode/.local/share/opencode \
              /home/opencode/.config/opencode \
              /home/opencode/.config/opencode/agent \
+             /home/opencode/.config/opencode/commands \
+             /home/opencode/.local/bin \
              /home/opencode/.cache/opencode/packages \
              /home/opencode/.cache/headroom \
              /home/opencode/.cache/playwright \
@@ -262,6 +264,22 @@ RUN mkdir -p /var/opencode/workspaces \
       'A headless-Chromium browser-automation server (`playwright`) is registered but **OFF by default**.  If a task needs to load a web page, click, fill a form, or capture a screenshot, ask a Driver to enable `playwright` in the session MCP panel first — until it shows a green dot the browser tools are unavailable.' \
       '' \
       'Once enabled, drive the browser with `browser_navigate`, `browser_click`, `browser_type`, `browser_snapshot` (accessibility tree — prefer it over screenshots for reading page state) and `browser_take_screenshot`.  Output lands in /home/opencode/.cache/playwright-output.  Reach for it to verify the live frontend preview, inspect a page the user references, or reproduce a UI bug — not for routine file edits.' \
+      '' \
+      '## Forge (LLM-driven development workflow)' \
+      '' \
+      'Forge slash commands are available in every session.  They implement a structured feature-development workflow — specification → plan → implement → verify → PR — using typed markdown artifacts (Feature Contexts, Implementation Contexts, plans, tasks) stored in git.' \
+      '' \
+      '**Core commands:**' \
+      '- `/forge-status [FEAT-NNN|IMPL-NNN]` — vault-wide overview or single-artifact detail.  Run at session start to orient.' \
+      '- `/forge-resume IMPL-NNN` — restore a saved session (pulls vault, restores plan/tasks/verification, reports active task).' \
+      '- `/forge-plan IMPL-NNN` — scaffold plan.md + tasks.md for an Implementation Context.' \
+      '- `/forge-work IMPL-NNN` — expand + implement the next pending task end-to-end, commit, checkpoint.' \
+      '- `/forge-loop IMPL-NNN` — iterate `/forge-work` until all tasks are terminal.' \
+      '- `/forge-verify IMPL-NNN` — verify implementation against acceptance criteria.' \
+      '- `/forge-pr IMPL-NNN` — push the impl branch and open a PR with vault-derived body.' \
+      '- `/forge-snapshot IMPL-NNN` — save plan/tasks/verification to the vault so another session can resume.' \
+      '' \
+      'The Forge CLI is at `~/.local/bin/forge` (on PATH).  Forge artifacts live in the product vault — auto-discovered from `git config forge.vault` or a `forge-vault/` sibling directory.  Execution artifacts (plan.md, tasks.md, verification.md) are local to `<repo>/.forge/current/` and gitignored.' \
       > /home/opencode/.config/opencode/AGENTS.md && \
     # Bake the "fast" agent into the container so it shows up in the iframe's
     # per-session agent picker.  Haiku-powered, minimal ceremony.  Users in
@@ -307,6 +325,35 @@ RUN mkdir -p /var/opencode/workspaces \
       > /home/opencode/.config/opencode/agent/fast.md && \
     # Carry the pre-installed plugin tree across from /root.
     cp -r /root/.cache/opencode/packages/. /home/opencode/.cache/opencode/packages/ 2>/dev/null || true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Install Forge (unleashlive/Forge) — bakes the opencode adapter slash commands
+# into /home/opencode/.config/opencode/commands/ and the Forge CLI into
+# /home/opencode/.forge + /home/opencode/.local/bin/forge.
+#
+# Uses the same github_token BuildKit secret as the pnpm store warm below.
+# Skips gracefully when the secret is absent (local builds, unset CI secret).
+# ─────────────────────────────────────────────────────────────────────────────
+RUN --mount=type=secret,id=github_token,required=false \
+    TOKEN_FILE=/run/secrets/github_token; \
+    if [ ! -s "$TOKEN_FILE" ]; then \
+      echo "[forge-install] no github_token secret — skipping Forge installation (commands unavailable at runtime)"; \
+    else \
+      TOKEN="$(cat "$TOKEN_FILE")"; \
+      echo "[forge-install] cloning unleashlive/Forge…"; \
+      if git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/unleashlive/Forge.git" /home/opencode/.forge >/tmp/forge-clone.log 2>&1; then \
+        chmod +x /home/opencode/.forge/scripts/forge*; \
+        ln -sf /home/opencode/.forge/scripts/forge /home/opencode/.local/bin/forge; \
+        cp /home/opencode/.forge/adapters/opencode/commands/*.md /home/opencode/.config/opencode/commands/; \
+        CMD_COUNT=$(ls /home/opencode/.config/opencode/commands/forge-*.md 2>/dev/null | wc -l | tr -d ' '); \
+        FORGE_VER=$(cat /home/opencode/.forge/CHANGELOG.md 2>/dev/null | grep -m1 '^## ' | sed 's/## //') || FORGE_VER="unknown"; \
+        echo "[forge-install] installed ${CMD_COUNT} Forge commands (${FORGE_VER}) → /home/opencode/.config/opencode/commands/"; \
+        rm -f /tmp/forge-clone.log; \
+      else \
+        echo "[forge-install] WARNING: clone failed — Forge commands will be unavailable:"; tail -3 /tmp/forge-clone.log || true; \
+        rm -f /tmp/forge-clone.log; \
+      fi; \
+    fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Pre-warm the pnpm content-addressed store with unleashlive/frontend +
