@@ -333,7 +333,12 @@ RUN mkdir -p /var/opencode/workspaces \
 #
 # Uses the same github_token BuildKit secret as the pnpm store warm below.
 # Skips gracefully when the secret is absent (local builds, unset CI secret).
+#
+# FORGE_CACHE_BUST: bump this value to force a cache miss on the step below
+# (needed when the github_token secret changes, since BuildKit caches by
+# instruction text, not secret value).
 # ─────────────────────────────────────────────────────────────────────────────
+ARG FORGE_CACHE_BUST=1
 RUN --mount=type=secret,id=github_token,required=false \
     TOKEN_FILE=/run/secrets/github_token; \
     if [ ! -s "$TOKEN_FILE" ]; then \
