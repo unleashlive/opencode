@@ -92,6 +92,8 @@ jobs:
           # the image still builds — runtime installs just stay cold (~10 min)
           # until a warmed image ships.  So this is safe to merge before the
           # secret exists.
+          build-args: |
+            FORGE_CACHE_BUST=2
           secrets: |
             github_token=${{ secrets.WARM_STORE_GITHUB_TOKEN }}
 
