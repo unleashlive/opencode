@@ -160,3 +160,98 @@ All source code changes are committed. Secrets are **never** committed.
 ```
 
 The `.env.example` file documents all required variables without values.
+
+---
+
+## Forge — LLM-driven development workflow
+
+Forge is a structured workflow framework baked into every collab session. It replaces ad-hoc prompting with typed markdown artifacts — Feature Contexts, Implementation Contexts, plans, tasks — that persist in git, survive session restarts, and can be fed back to any LLM to resume work exactly where a previous session stopped.
+
+### Pre-installed in every session
+
+No manual setup needed. Every collab ECS container ships with:
+
+| Path | Contents |
+|---|---|
+| `~/.config/opencode/commands/` | 28 Forge slash commands, auto-loaded by opencode |
+| `~/.forge/` | Full Forge checkout (scripts, prompts, templates, adapters) |
+| `~/.local/bin/forge` | The `forge` CLI, on PATH |
+
+The Forge version installed is printed in the ECS build logs as `[forge-install] installed N Forge commands (version)`.
+
+> **Note:** Forge commands are loaded at session startup. If you deployed a new image, start a **new** collab session to get them — existing sessions won't pick them up.
+
+### The 3-layer model
+
+```
+FEAT-NNN (what & why)  →  IMPL-NNN (how, per stack)  →  plan · tasks · verify (do it)
+```
+
+- **FEAT-NNN** — Feature Context: product brief, user stories, success metrics. Lives in the vault under `features/`.
+- **IMPL-NNN** — Implementation Context: technical spec for one stack, synthesised from a FEAT. Lives in `implementations/`. This is what you work against in a session.
+- **Vault** — a git repo (or folder) holding all FEAT and IMPL artifacts. Auto-discovered from `git config forge.vault` or a `forge-vault/` sibling directory.
+- **Execution artifacts** — `plan.md`, `tasks.md`, `verification.md`. Local to `<repo>/.forge/current/`, gitignored. Persisted to the vault via `/forge-snapshot`.
+
+### Typical session workflow
+
+```bash
+# Brand-new implementation
+/forge-status                  # see what's in the vault
+/forge-plan   IMPL-042         # scaffold plan + tasks
+/forge-loop   IMPL-042         # implement until all tasks done
+/forge-verify IMPL-042         # verify acceptance criteria
+/forge-pr     IMPL-042         # open PR with vault-derived body
+
+# Picking up someone else's work
+/forge-resume IMPL-042         # restore vault snapshot → ready to /forge-work
+```
+
+**Step-by-step:**
+
+1. **Orient** — `/forge-status` or `/forge-status IMPL-NNN` for a single artifact. Run at session start.
+2. **Resume** *(if continuing work)* — `/forge-resume IMPL-NNN` pulls the vault, restores execution artifacts from the latest snapshot, and reports the active task.
+3. **Plan** *(if starting fresh)* — `/forge-plan IMPL-NNN` scaffolds `plan.md` + `tasks.md` and records a constitution baseline.
+4. **Implement** — `/forge-work IMPL-NNN` picks the next pending task, implements it end-to-end, commits, and checkpoints. `/forge-loop` iterates until all tasks are terminal.
+5. **Verify** — `/forge-verify IMPL-NNN` checks acceptance criteria and marks them green in `verification.md`.
+6. **PR** — `/forge-pr IMPL-NNN` pushes the impl branch and opens a GitHub PR with a vault-derived body.
+7. **Snapshot** *(handoff)* — `/forge-snapshot IMPL-NNN` saves current execution state to the vault so another session can resume from this exact point.
+
+### Core commands reference
+
+| Command | What it does | Argument |
+|---|---|---|
+| `/forge-status` | Vault-wide overview or single-artifact detail. Suggests next command based on state. | `[FEAT-NNN\|IMPL-NNN]` |
+| `/forge-resume` | Restore a saved session: pull vault, checkout branch, restore execution artifacts. | `IMPL-NNN [--force]` |
+| `/forge-plan` | Scaffold `plan.md`, `tasks.md`, `verification.md` for an Implementation Context. | `IMPL-NNN` |
+| `/forge-work` | Expand and implement the next pending task end-to-end, commit, checkpoint. | `IMPL-NNN` |
+| `/forge-loop` | Iterate `/forge-work` until all tasks are terminal. | `IMPL-NNN` |
+| `/forge-verify` | Verify implementation against acceptance criteria; marks ACs green with evidence. | `IMPL-NNN` |
+| `/forge-pr` | Push impl branch and open a GitHub PR with vault-derived body. | `IMPL-NNN` |
+| `/forge-snapshot` | Commit execution artifacts to the vault so another session can resume. | `IMPL-NNN [-m "msg"]` |
+| `/forge-specify` | Turn a rough idea into a structured Feature Context. | `feature idea` |
+| `/forge-synthesize` | Synthesise an Implementation Context from a FEAT for a given repo/stack. | `FEAT-NNN --repo owner/repo` |
+| `/forge-doctor` | Health check: vault link, branch state, forge version, required tooling. | — |
+| `/forge-audit` | Scan diff for constitution anti-patterns and style violations. | — |
+
+Full command reference (28 commands across 5 groups) is in the [Forge · Collab Session Reference](https://claude.ai/code/artifact/5b1acf08-7ab7-43cf-ac7b-b3ee8d199597) artifact.
+
+### Vault & artifact paths
+
+Forge auto-discovers the vault by looking for:
+- `git config forge.vault` — explicit path set during `/forge-repo-init`
+- A `forge-vault/` directory adjacent to the current repo checkout
+
+Execution artifacts are gitignored in the target repo and shared between sessions only through vault snapshots:
+
+```
+<repo>/.forge/current/
+  ├── plan.md           # implementation approach, design decisions
+  ├── tasks.md          # task list with status, ACs, file list
+  └── verification.md   # acceptance criteria, test plan, evidence
+
+# After /forge-snapshot:
+implementations/IMPL-NNN-slug/snapshot/
+  ├── plan.md
+  ├── tasks.md
+  └── verification.md
+```
