@@ -863,6 +863,30 @@ export async function configureWorkspaceGitIdentity(
 }
 
 /**
+ * Refresh the `origin` remote URL in every cloned repo for this session with a
+ * fresh OAuth token. Call on SSE connect/reconnect so the credential in
+ * .git/config never goes stale after a token revoke + reissue. Non-throwing.
+ */
+export async function refreshWorkspaceRemoteTokens(
+  collabSessionId: string,
+  repos: string[],
+  userAccessToken: string,
+): Promise<void> {
+  if (!userAccessToken) return
+  const root = sessionWorkspacePath(collabSessionId)
+  for (const repo of repos) {
+    const dest = join(root, repoName(repo))
+    if (!existsSync(dest)) continue
+    const newUrl = `https://x-access-token:${userAccessToken}@github.com/${repo}.git`
+    try {
+      await runAsync("git", ["-C", dest, "remote", "set-url", "origin", newUrl], {})
+    } catch (err) {
+      console.warn(`[collab.workspace] refreshWorkspaceRemoteTokens: failed for ${repo}:`, err)
+    }
+  }
+}
+
+/**
  * Push committed changes for a workspace repo back to the GitHub remote.
  *
  * The token came in via the original clone URL (baked into .git/config by

@@ -54,6 +54,7 @@ import {
   readRepoBranches,
   writeMcpConfig,
   clearMcpConfig,
+  refreshWorkspaceRemoteTokens,
 } from "./workspace"
 import { readFile } from "node:fs/promises"
 import { openCollabPullRequests } from "./github-pr"
@@ -2399,6 +2400,15 @@ function handleSse(
     // deploy, no restart required.  Cheap + idempotent (one tiny atomic write
     // per repo); silently no-ops for sessions whose workspace isn't cloned yet.
     refreshParticipantsFileForSession(collabSessionId)
+
+    // Refresh git remote URLs with the reconnecting user's fresh OAuth token.
+    // Keeps .git/config current when tokens are revoked and reissued — the
+    // baked-in clone token is otherwise never updated after initSessionWorkspace.
+    if (sess.githubAccessToken && collabSession.repos?.length) {
+      refreshWorkspaceRemoteTokens(collabSessionId, collabSession.repos, sess.githubAccessToken).catch(
+        (err) => console.warn("[collab] refreshWorkspaceRemoteTokens error:", err),
+      )
+    }
 
     Participant.setOnline(collabSessionId, sess.githubId, true)
     const participant = collabSession.participants.find((p) => p.githubId === sess.githubId)
