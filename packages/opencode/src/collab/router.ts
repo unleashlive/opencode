@@ -2321,7 +2321,7 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
 // ── SSE stream handler ──────────────────────────────────────────────────────────
 
 function handleSse(
-  _req: Request,
+  req: Request,
   collabSessionId: string,
   sess: { githubId: number; githubLogin: string },
 ): Response {
@@ -2404,8 +2404,11 @@ function handleSse(
     // Refresh git remote URLs with the reconnecting user's fresh OAuth token.
     // Keeps .git/config current when tokens are revoked and reissued — the
     // baked-in clone token is otherwise never updated after initSessionWorkspace.
-    if (sess.githubAccessToken && collabSession.repos?.length) {
-      refreshWorkspaceRemoteTokens(collabSessionId, collabSession.repos, sess.githubAccessToken).catch(
+    // We need the full session (incl. githubAccessToken) which the outer narrowed
+    // `sess` parameter omits, so we re-fetch it from the request here.
+    const fullSess = getSession(req)
+    if (fullSess?.githubAccessToken && collabSession.repos?.length) {
+      refreshWorkspaceRemoteTokens(collabSessionId, collabSession.repos, fullSess.githubAccessToken).catch(
         (err) => console.warn("[collab] refreshWorkspaceRemoteTokens error:", err),
       )
     }
