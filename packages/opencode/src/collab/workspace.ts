@@ -875,11 +875,13 @@ export async function refreshWorkspaceRemoteTokens(
   if (!userAccessToken) return
   const root = sessionWorkspacePath(collabSessionId)
   for (const repo of repos) {
-    const dest = join(root, repoName(repo))
+    const name = repo.split("/").pop() ?? repo
+    const dest = join(root, name)
     if (!existsSync(dest)) continue
     const newUrl = `https://x-access-token:${userAccessToken}@github.com/${repo}.git`
     try {
       await runAsync("git", ["-C", dest, "remote", "set-url", "origin", newUrl], {})
+      console.log(`[collab.workspace] refreshWorkspaceRemoteTokens: updated remote for ${repo}`)
     } catch (err) {
       console.warn(`[collab.workspace] refreshWorkspaceRemoteTokens: failed for ${repo}:`, err)
     }
