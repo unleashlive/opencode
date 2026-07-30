@@ -121,18 +121,6 @@ echo "[entrypoint] CLAUDE_CREDENTIALS_PATH=$CLAUDE_CREDENTIALS_PATH"
 # container uid; tracked separately.
 git config --global --add safe.directory '*' 2>/dev/null || true
 
-# Configure GitHub HTTPS auth for git push from inside collab sessions.
-# GITHUB_PUSH_TOKEN is a fine-grained PAT (Contents:write) wired from
-# Secrets Manager via the ECS task definition.  The url.insteadOf rewrite
-# transparently injects credentials into every https://github.com/ operation
-# so sessions can push without any per-user git config.
-if [ -n "${GITHUB_PUSH_TOKEN:-}" ]; then
-  git config --global url."https://x-access-token:${GITHUB_PUSH_TOKEN}@github.com/".insteadOf "https://github.com/"
-  echo "[entrypoint] GitHub git auth configured (GITHUB_PUSH_TOKEN present)"
-else
-  echo "[entrypoint] WARN: GITHUB_PUSH_TOKEN not set — git push to GitHub will fail inside sessions"
-fi
-
 # Hand off to the real server.  $@ propagates whatever args ECS / CMD passed.
 exec bun run --cwd packages/opencode src/index.ts serve \
   --port 4096 --hostname 0.0.0.0 --print-logs "$@"
