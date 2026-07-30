@@ -103,6 +103,50 @@ const collabMiddleware: HttpMiddleware.HttpMiddleware = (app) =>
     // regardless of Host.)
     const ph = previewHost()
     if (ph && host === ph) {
+      // Service-worker kill-switch — MUST come before the auth gate.
+      //
+      // The Angular app (environment.cirrus.ts: serviceWorker=true) tries to
+      // register ngsw-worker.js.  The `preview` ng serve config has
+      // `serviceWorker: false` so Angular CLI never generates that file.
+      // An OLD service worker from a prior visit stays active in the browser,
+      // intercepts chunk requests, and returns 404 for chunks it doesn't know
+      // about (different content hashes in the current build).
+      //
+      // Fix: serve a kill-switch script at /ngsw-worker.js.  The browser's SW
+      // update mechanism fetches SW scripts directly from the network, bypassing
+      // any running SW, so the kill-switch IS received even when the old SW is
+      // active.  The kill-switch:
+      //   1. Calls skipWaiting() → activates immediately, replacing the old SW
+      //   2. Claims all open clients
+      //   3. Unregisters itself → no SW active
+      //   4. Navigates (reloads) all clients → fresh load with no SW, chunks load
+      //
+      // Served without auth so the browser can reach it even in the initial
+      // credentialless SW update check.  Cache-Control: no-store ensures the
+      // browser always re-fetches this rather than using a cached copy.
+      if (pathname === "/ngsw-worker.js") {
+        const swKillswitch = [
+          "self.addEventListener('install', () => { self.skipWaiting() })",
+          "self.addEventListener('activate', event => {",
+          "  event.waitUntil(",
+          "    self.clients.claim()",
+          "      .then(() => self.registration.unregister())",
+          "      .then(() => self.clients.matchAll())",
+          "      .then(clients => clients.forEach(c => c.navigate(c.url)))",
+          "  )",
+          "})",
+        ].join("\n")
+        console.log("[collab.preview] serving ngsw-worker.js kill-switch to clear stale service worker")
+        return HttpServerResponse.raw(new TextEncoder().encode(swKillswitch), {
+          status: 200,
+          headers: new Headers({
+            "content-type": "application/javascript; charset=utf-8",
+            "cache-control": "no-store",
+            "service-worker-allowed": "/",
+          }),
+        })
+      }
+
       // Browsers fetch certain well-known files credentiallessly (PWA spec):
       //  - manifest.webmanifest / manifest.json — no credentials by W3C spec
       //  - favicon.ico — browser auto-fetches without credentials
