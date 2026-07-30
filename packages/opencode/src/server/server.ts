@@ -103,11 +103,27 @@ const collabMiddleware: HttpMiddleware.HttpMiddleware = (app) =>
     // regardless of Host.)
     const ph = previewHost()
     if (ph && host === ph) {
+      // Browsers fetch certain well-known files credentiallessly (PWA spec):
+      //  - manifest.webmanifest / manifest.json — no credentials by W3C spec
+      //  - favicon.ico — browser auto-fetches without credentials
+      // Auth-gate them like regular preview assets (cookie-only, rule a0) but
+      // serve them WITHOUT a cookie check so unauthenticated browsers don't
+      // see a 403 that breaks the PWA install prompt or tab icon.
+      const isUnauthenticatedBrowserFetch =
+        pathname === "/manifest.webmanifest" ||
+        pathname === "/manifest.json" ||
+        pathname === "/favicon.ico"
+
       const webRequest = yield* HttpServerRequest.toWeb(req)
       // Same shell-trust gate as the legacy path (ADR-0001): a valid collab
       // cookie is enough.  cookieAuthorizesRequest now allows when the Host
       // is the preview host (see cookie-auth.ts rule a0).
-      if (cookieAuthorizesRequest(webRequest) !== "allow") {
+      if (!isUnauthenticatedBrowserFetch && cookieAuthorizesRequest(webRequest) !== "allow") {
+        const hasCookie = !!(webRequest.headers.get("cookie") ?? "").includes("collab_sid=")
+        console.warn(
+          `[collab.preview] auth gate denied ${req.method} ${pathname} — ` +
+            `hasCookie=${hasCookie} host=${host}`,
+        )
         return HttpServerResponse.raw(new TextEncoder().encode("Forbidden"), {
           status: 403,
           headers: new Headers({ "content-type": "text/plain" }),

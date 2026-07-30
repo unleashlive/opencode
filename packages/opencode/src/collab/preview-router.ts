@@ -123,8 +123,14 @@ const PREVIEW_UPSTREAM_HOST = "local.unleashlive.com"
  */
 const PREVIEW_UPSTREAM_TCP_HOST = "127.0.0.1"
 
-function upstreamHostHeader(port: number): string {
-  return `${PREVIEW_UPSTREAM_HOST}:${port}`
+function upstreamHostHeader(_port: number): string {
+  // Do NOT include the port in the Host header forwarded to the upstream dev
+  // server.  Angular CLI (Vite 6) validates the Host against `allowedHosts`
+  // WITHOUT stripping the port in some versions, so `local.unleashlive.com:8080`
+  // would fail to match `allowedHosts: ['local.unleashlive.com']` → 403 for
+  // every chunk file.  Omitting the port fixes the check; the dev server
+  // already knows its own port from the TCP listen configuration.
+  return PREVIEW_UPSTREAM_HOST
 }
 
 /**
