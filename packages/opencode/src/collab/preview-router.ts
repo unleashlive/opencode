@@ -273,6 +273,11 @@ export async function handlePreviewHttp(req: Request, port: number, rest: string
     // relied on the header to know when to stop reading.
     respHeaders.delete("content-encoding")
     respHeaders.delete("content-length")
+    // Prevent browser HTTP caching for dev preview responses.  The dev server
+    // can restart (ECS update, workspace re-provision) generating new esbuild
+    // chunk hashes.  A cached main.js referencing old hashes causes permanent
+    // 404s for lazy-loaded route chunks until the user hard-refreshes.
+    respHeaders.set("cache-control", "no-store")
     return new Response(upstream.body, {
       status: upstream.status,
       statusText: upstream.statusText,

@@ -514,6 +514,15 @@ export function launchPreview(
     ...process.env,
     OPENCODE_PREVIEW: "1",
     PORT: String(config.port),
+    // Angular 19's esbuild-based application builder controls its persistent
+    // cache via angular.json `cli.cache.environment` + the CI env var, NOT via
+    // NG_PERSISTENT_BUILD_CACHE (which is a webpack-era flag, ignored here).
+    // With the default `environment: "local"`, the cache is enabled when
+    // CI is falsy and DISABLED when CI=1.  Setting CI=1 forces a clean
+    // rebuild on every ng serve start, preventing stale .angular/cache/ on
+    // EFS from embedding old chunk IDs in main.js and causing 404s for
+    // lazy-loaded routes.  See packages/opencode/src/utils/normalize-cache.js.
+    CI: "1",
     // Inherit the container's NODE_OPTIONS (if any) unchanged and let the dev
     // server's own start script manage its V8 heap.
     //
@@ -898,10 +907,16 @@ function wireChildStreams(state: ActiveState): void {
       if (state.status === "installing") {
         let ready = false
         try {
-          ready =
-            (state.config.readyPattern !== undefined &&
-              new RegExp(state.config.readyPattern).test(line)) ||
-            /\b(local|ready|listening|started server on)\b/i.test(line)
+          // When a readyPattern is provided it is the sole authority — do NOT
+          // also apply the fallback heuristic.  The fallback fires on words
+          // like "listening" which appear in Angular CLI's startup banner
+          // *before* the initial build completes, causing chunk-404s on every
+          // first load.  Repos that have no readyPattern still get the fallback.
+          if (state.config.readyPattern !== undefined) {
+            ready = new RegExp(state.config.readyPattern).test(line)
+          } else {
+            ready = /\b(local|ready|listening|started server on)\b/i.test(line)
+          }
         } catch (e) {
           console.warn("[collab.preview] readyPattern match threw:", e)
         }
