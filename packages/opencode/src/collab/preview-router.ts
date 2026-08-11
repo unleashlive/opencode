@@ -273,6 +273,55 @@ export async function handlePreviewHttp(req: Request, port: number, rest: string
     // relied on the header to know when to stop reading.
     respHeaders.delete("content-encoding")
     respHeaders.delete("content-length")
+    // Prevent browser HTTP caching for dev preview responses.  The dev server
+    // can restart (ECS update, workspace re-provision) generating new esbuild
+    // chunk hashes.  A cached main.js referencing old hashes causes permanent
+    // 404s for lazy-loaded route chunks until the user hard-refreshes.
+    respHeaders.set("cache-control", "no-store")
+
+    // Inject a service-worker clearing script into HTML responses.
+    //
+    // Background: the Angular app uses environment.cirrus.ts (serviceWorker:
+    // true) which registers ngsw-worker.js at runtime.  The `preview` build
+    // config has `serviceWorker: false` so no ngsw files are generated, but
+    // the runtime registration attempt still fires.  An OLD service worker
+    // from a prior preview session (different chunk hashes) intercepts lazy
+    // route chunk requests and returns 404 because the new hashes aren't in
+    // its cache.
+    //
+    // The /ngsw-worker.js kill-switch (server.ts) replaces the old SW and
+    // unregisters it, but it only activates AFTER Angular boots and calls
+    // ServiceWorkerModule.register().  By that point the router has already
+    // tried to load lazy chunks → 404.
+    //
+    // This injected script runs synchronously before Angular boots.  It
+    // checks whether any SW is controlling the current page and if so
+    // unregisters all SWs and reloads once.  sessionStorage prevents a
+    // reload loop (subsequent loads find no SW to unregister so no reload).
+    const contentType = respHeaders.get("content-type") ?? ""
+    if (upstream.status === 200 && contentType.startsWith("text/html")) {
+      const swClearScript = `<script>
+(function(){
+  if(!('serviceWorker' in navigator))return;
+  if(sessionStorage.getItem('_sw_cleared'))return;
+  navigator.serviceWorker.getRegistrations().then(function(regs){
+    if(!regs.length)return;
+    sessionStorage.setItem('_sw_cleared','1');
+    return Promise.all(regs.map(function(r){return r.unregister();}))
+      .then(function(){window.location.reload();});
+  });
+})();
+</script>`
+      const html = await upstream.text()
+      const injected = html.includes("<head>") ? html.replace("<head>", "<head>" + swClearScript) : swClearScript + html
+      return new Response(injected, {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        headers: respHeaders,
+      })
+    }
+
+
     return new Response(upstream.body, {
       status: upstream.status,
       statusText: upstream.statusText,

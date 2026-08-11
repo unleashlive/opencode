@@ -125,14 +125,25 @@ const collabMiddleware: HttpMiddleware.HttpMiddleware = (app) =>
       // credentialless SW update check.  Cache-Control: no-store ensures the
       // browser always re-fetches this rather than using a cached copy.
       if (pathname === "/ngsw-worker.js") {
+        // Kill-switch: replace any running Angular SW and immediately
+        // unregister so subsequent fetches go straight to the network.
+        //
+        // NOTE: we intentionally do NOT call c.navigate(c.url) here.
+        // The old code used navigate() hoping for an automatic reload after
+        // unregistration, but that caused an infinite reload loop:
+        //   Angular boots → registers SW → gets kill-switch → skipWaiting
+        //   → activates → claims → unregisters → navigate() → reload →
+        //   Angular boots again → registers SW → kill-switch again → loop
+        //
+        // Instead we rely on the index.html SW-clearing script (injected by
+        // handlePreviewHttp) to do a one-time reload BEFORE Angular boots,
+        // which eliminates the first-load chunk-404 without any loop.
         const swKillswitch = [
           "self.addEventListener('install', () => { self.skipWaiting() })",
           "self.addEventListener('activate', event => {",
           "  event.waitUntil(",
           "    self.clients.claim()",
           "      .then(() => self.registration.unregister())",
-          "      .then(() => self.clients.matchAll())",
-          "      .then(clients => clients.forEach(c => c.navigate(c.url)))",
           "  )",
           "})",
         ].join("\n")
