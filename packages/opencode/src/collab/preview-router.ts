@@ -254,6 +254,33 @@ export async function handlePreviewHttp(req: Request, port: number, rest: string
         `(content-encoding=${upstream.headers.get("content-encoding") ?? "none"})`,
     )
 
+    // Vite injects `import '/@vite/client'` into every module in dev mode.
+    // When Angular CLI runs with --hmr=false --live-reload=false, Vite's dev
+    // server returns 500 for that path.  The 500 causes the entire lazy route
+    // chunk to fail to link ("Failed to fetch dynamically imported module")
+    // even though all chunk files themselves return 200.  Serve a no-op stub
+    // so the import resolves and Angular can load lazy routes normally.
+    if (!upstream.ok && rest === "/@vite/client") {
+      console.log("[collab.preview-proxy] /@vite/client returned non-200; serving no-op stub")
+      const stub = [
+        "// @vite/client stub — HMR disabled, no-op to satisfy Vite module graph",
+        "export const createHotContext = () => ({",
+        "  accept: () => {}, acceptExports: () => {}, dispose: () => {},",
+        "  prune: () => {}, invalidate: () => {}, on: () => {}, send: () => {},",
+        "})",
+        "export const updateStyle = () => {}",
+        "export const removeStyle = () => {}",
+        "export const injectQuery = (u, _) => u",
+      ].join("\n")
+      return new Response(stub, {
+        status: 200,
+        headers: new Headers({
+          "content-type": "application/javascript; charset=utf-8",
+          "cache-control": "no-store",
+        }),
+      })
+    }
+
     // Pass through the upstream's body (which may itself be a stream) and
     // headers as-is, minus anything hop-by-hop the upstream might have set.
     const respHeaders = new Headers(upstream.headers)
