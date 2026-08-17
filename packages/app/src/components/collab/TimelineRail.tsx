@@ -135,6 +135,11 @@ export function TimelineRail(props: { myLogin: string; class?: string }) {
 
   const days = createMemo(() => groupTimeline(filtered(), now()))
   const defaults = createMemo(() => openByDefault(now()))
+  // Sum of the per-day counts, not filtered().length: groupTimeline dedupes
+  // by event id (the same prompt can arrive via both /export history and
+  // collab.promptLog()), so the raw pre-dedup array can be longer than what
+  // is actually rendered below.
+  const renderedCount = createMemo(() => days().reduce((n, d) => n + d.count, 0))
 
   function isOpen(key: string, fallback: boolean): boolean {
     const override = openOverrides()[key]
@@ -161,7 +166,7 @@ export function TimelineRail(props: { myLogin: string; class?: string }) {
     >
       <div class="flex h-11 shrink-0 items-center gap-2 border-b border-border-weak-base px-3">
         <span class="text-12-medium text-text-strong">Timeline</span>
-        <span class="font-mono text-[10.5px] text-text-weak">{filtered().length}</span>
+        <span class="font-mono text-[10.5px] text-text-weak">{renderedCount()}</span>
         <span class="ml-auto truncate font-mono text-[10.5px] text-text-base" title={routingHint()}>
           {routingHint()}
         </span>

@@ -224,16 +224,33 @@ export function CollabProvider(props: CollabProviderProps) {
   const LOG_CAP = 300
   let activitySeq = 0
 
+  /** How far back (rows) and how long (ms) recordActivity looks for a repeat. */
+  const DEDUP_TAIL_ROWS = 30
+  const DEDUP_WINDOW_MS = 60_000
+
   /**
-   * Append an action row.  Ignores an exact repeat of the previous row within
-   * 5 s: the SSE stream replays state on every reconnect (preview_started in
-   * particular), and a flapping connection would otherwise stutter the rail.
+   * Append an action row.  Skips it if an entry with the same `text` and
+   * `author` already exists within the last DEDUP_TAIL_ROWS rows AND within
+   * the last DEDUP_WINDOW_MS: the server replays state events on every SSE
+   * reconnect (collab:preview_started in particular), and a connection that
+   * flaps more than a few seconds apart would otherwise append a fresh
+   * `act-N` row per reconnect that groupTimeline has no id to dedupe. Only
+   * comparing the single most recent row and a 5 s window (the previous
+   * rule) missed reconnects spaced further apart or with one unrelated event
+   * in between, so this scans a wider recent tail over a longer window
+   * instead.
+   *
+   * The correct long-term fix is server-side event ids/timestamps for the
+   * action feed, already recorded in COLLAB-UI-UPLIFT.md under "S3 data gaps".
    */
   function recordActivity(text: string, author: string | null = null) {
     setActivityLog((prev) => {
-      const last = prev[prev.length - 1]
       const now = Date.now()
-      if (last && last.text === text && now - last.at < 5000) return prev
+      const tailStart = Math.max(0, prev.length - DEDUP_TAIL_ROWS)
+      for (let i = prev.length - 1; i >= tailStart; i--) {
+        const row = prev[i]
+        if (row.text === text && row.author === author && now - row.at < DEDUP_WINDOW_MS) return prev
+      }
       const next = prev.concat({ id: `act-${++activitySeq}`, at: now, author, text })
       return next.length > LOG_CAP ? next.slice(next.length - LOG_CAP) : next
     })
