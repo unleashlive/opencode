@@ -1666,7 +1666,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                               variant="ghost"
                               size="normal"
                               style={control()}
-                              class="min-w-0 max-w-[320px] text-13-regular text-text-warning group"
+                              class="min-w-0 max-w-[320px] text-13-regular text-text-on-warning-base group"
                               onClick={() => {
                                 void import("@/components/dialog-connect-provider").then((x) => {
                                   dialog.show(() => <x.DialogConnectProvider provider={providerID()} />)
