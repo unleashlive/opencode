@@ -1673,7 +1673,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                                 })
                               }}
                             >
-                              <Icon name="triangle-warning" class="size-4 shrink-0 text-icon-warning-base" />
+                              <Icon name="warning" class="size-4 shrink-0 text-icon-warning-base" />
                               <span class="truncate">Reconnect {providerID()}</span>
                               <Icon name="chevron-down" size="small" class="shrink-0" />
                             </Button>

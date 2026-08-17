@@ -751,7 +751,7 @@ function ClaudeCredentialsSection(props: { onUploadComplete: () => void }) {
       <Show when={status() !== null && !status()!.present}>
         <div class="flex flex-col gap-3">
           <div class="flex items-start gap-2 text-12-regular text-text-on-warning-base">
-            <Icon name="triangle-warning" class="size-4 shrink-0 mt-0.5 text-icon-warning-base" />
+            <Icon name="warning" class="size-4 shrink-0 mt-0.5 text-icon-warning-base" />
             <div class="flex flex-col gap-0.5">
               <span class="text-12-medium text-text-strong">No Claude credentials on this server</span>
               <span class="text-text-base">Anthropic models won't be available until credentials are uploaded.</span>
