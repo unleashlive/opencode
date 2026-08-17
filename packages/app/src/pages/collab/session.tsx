@@ -29,10 +29,10 @@ import { AddRepoDialog } from "@/components/collab/AddRepoDialog"
 import { TutorialDialog } from "@/components/collab/TutorialDialog"
 import { McpConfigDialog } from "@/components/collab/McpConfigDialog"
 import { TeamChatRail } from "@/components/collab/TeamNoteComposer"
-import { PreviewLauncher } from "@/components/collab/PreviewLauncher"
+import { StatusStrip } from "@/components/collab/StatusStrip"
 import { base64Encode } from "@opencode-ai/core/util/encode"
-import type { CollabRole, Participant, PromptSuggestion, RepoPrResult } from "@opencode-ai/collab"
-import { BTN_PRIMARY, BTN_SUCCESS, BTN_SECONDARY, PILL_BRAND } from "@/components/collab/ui"
+import type { CollabRole, Participant, PromptSuggestion } from "@opencode-ai/collab"
+import { BTN_PRIMARY, BTN_SECONDARY, PILL_BRAND } from "@/components/collab/ui"
 import { renderMentions } from "@/components/collab/mentions"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -146,138 +146,6 @@ function ParticipantRow(props: {
         </span>
       </Show>
       <span class={`text-[10px] ${props.roleColorClass}`}>{props.roleLabel}</span>
-    </div>
-  )
-}
-
-// ── Open-PR button ────────────────────────────────────────────────────────────
-
-/**
- * Driver-only button rendered in the left collab panel.  Calls
- * POST /collab/session/:id/pr which git-pushes the current branch and
- * opens a pull request on GitHub.  Surfaces the PR URL on success;
- * surfaces the GitHub error verbatim on failure (e.g. "no commits
- * yet").
- */
-function OpenPrButton() {
-  const collab = useCollab()
-  const [busy, setBusy] = createSignal(false)
-  const [results, setResults] = createSignal<RepoPrResult[]>([])
-  const [error, setError] = createSignal<string | null>(null)
-  // Lock the button out for the rest of the page lifetime when the branch
-  // has no commits yet.  The server-side wrap (github-pr.ts) returns a
-  // friendly 400 in that case; the SPA picks up on that exact wording so
-  // it doesn't have to know about the underlying GitHub 422.  Either side
-  // alone would do the job — keeping both is defence-in-depth (Q2 "both"
-  // path in the deploy review): the server stops bad PRs from being
-  // created, the client stops the user from re-clicking into the same
-  // error message a dozen times.
-  const [locked, setLocked] = createSignal(false)
-
-  /** Heuristic for the "no commits yet" condition.  Both the wrapped 400
-   *  ("No commits to open a PR with yet.") and the raw GitHub 422
-   *  ("No commits between …") fall in here, in case anything bypasses
-   *  the server-side wrap (older deployments, partial rollouts). */
-  function looksLikeEmptyBranch(message: string): boolean {
-    return /no commits (to open|between)/i.test(message)
-  }
-
-  async function openPr() {
-    setBusy(true)
-    setError(null)
-    try {
-      const { results: r } = await collab.openPullRequest()
-      setResults(r)
-      const opened = r.filter((x) => x.status === "opened")
-      // Lock only when there were repos and every one had no commits — nothing
-      // to PR until the LLM commits.  A mix of opened/errored stays clickable.
-      if (r.length > 0 && r.every((x) => x.status === "skipped")) setLocked(true)
-      // Auto-open just the first opened PR (not one tab per repo).
-      const first = opened[0]
-      if (first && first.status === "opened") window.open(first.url, "_blank", "noreferrer")
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      setError(message)
-      if (looksLikeEmptyBranch(message)) setLocked(true)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div class="px-3 py-3 border-t border-zinc-800/60 flex-shrink-0 space-y-1.5">
-      <button
-        type="button"
-        onClick={openPr}
-        disabled={busy() || locked()}
-        title={locked() ? "No commits on the collab branch yet — ask the LLM to make a commit first." : undefined}
-        class={`${BTN_SUCCESS} w-full py-2 text-sm`}
-      >
-        <Show
-          when={!busy()}
-          fallback={
-            <>
-              <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Opening PR…
-            </>
-          }
-        >
-          {/* git-pull-request icon */}
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <circle cx="6" cy="6" r="2" />
-            <circle cx="6" cy="18" r="2" />
-            <circle cx="18" cy="18" r="2" />
-            <path stroke-linecap="round" d="M6 8v8M18 8v8" />
-          </svg>
-          Open Pull Request
-        </Show>
-      </button>
-      <Show when={results().length > 0}>
-        <div class="space-y-1">
-          <For each={results()}>
-            {(r) => (
-              <Show
-                when={r.status === "opened"}
-                fallback={
-                  <Show
-                    when={r.status === "skipped"}
-                    fallback={
-                      <div
-                        class="text-[11px] text-red-400 bg-red-400/10 border border-red-400/20 rounded px-2 py-1"
-                        title={r.status === "error" ? r.error : undefined}
-                      >
-                        {r.repo.split("/")[1] ?? r.repo}: {r.status === "error" ? r.error : ""}
-                      </div>
-                    }
-                  >
-                    <div class="text-[11px] text-zinc-500 truncate" title={`${r.repo}: no changes on the collab branch`}>
-                      {r.repo.split("/")[1] ?? r.repo}: no changes
-                    </div>
-                  </Show>
-                }
-              >
-                <a
-                  href={r.status === "opened" ? r.url : "#"}
-                  target="_blank"
-                  rel="noreferrer"
-                  class="block text-[11px] text-emerald-400 hover:text-emerald-300 truncate"
-                  title={r.status === "opened" ? r.url : undefined}
-                >
-                  → {r.repo.split("/")[1] ?? r.repo}: {r.status === "opened" ? r.url : ""}
-                </a>
-              </Show>
-            )}
-          </For>
-        </div>
-      </Show>
-      <Show when={error()}>
-        <div class="text-[11px] text-red-400 bg-red-400/10 border border-red-400/20 rounded px-2 py-1 whitespace-pre-wrap">
-          {error()}
-        </div>
-      </Show>
     </div>
   )
 }
@@ -983,18 +851,6 @@ function CollabSessionInner(props: { me: Me }) {
           </Show>
         </div>
 
-        {/* Frontend live-preview launcher — renders only when the session
-            has a preview-capable repo (.opencode-preview.json present OR a
-            repo named "frontend").  See packages/opencode/src/collab/preview-launcher.ts
-            and ~/.claude/plans/frontend-live-preview.md.  Self-hides
-            otherwise; visible to all participants but only Drivers can click. */}
-        <PreviewLauncher />
-
-        {/* Open PR — Drivers only, only when at least one repo is linked. */}
-        <Show when={myRole() === "driver" && (collab.session()?.repos?.length ?? 0) > 0}>
-          <OpenPrButton />
-        </Show>
-
         {/* Compact context — Drivers only, only when a native session exists. */}
         <Show when={myRole() === "driver" && !!collab.session()?.sessionId}>
           <CompactButton />
@@ -1125,14 +981,11 @@ function CollabSessionInner(props: { me: Me }) {
         classList={{ flex: mobileView() === "editor", hidden: mobileView() === "panel" }}
       >
 
-        {/* Top-right chrome — connection status only.  The preview-port
-            pills now live next to the "Repos" title in the left panel. */}
-        <Show when={!collab.isConnected()}>
-          <div class="absolute top-2 right-3 z-10 flex items-center gap-1.5 text-xs text-amber-500 bg-zinc-900/80 px-2 py-1 rounded-full border border-zinc-700/50">
-            <div class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-            Reconnecting…
-          </div>
-        </Show>
+        {/* Persistent status strip: connection state, the agent + model the
+            last prompt carried, then the work actions (open PR, live preview).
+            It also owns the preview lifecycle rows, so the floating
+            "Reconnecting…" chip that used to sit over the iframe is gone. */}
+        <StatusStrip myRole={myRole()} />
 
         {/* Iframe gate: no repos → render the recovery panel instead of the
             iframe.  Server side enforces the same — /<base64>/?cs=<id> with
