@@ -1,4 +1,5 @@
 @import "@opencode-ai/ui/styles/tailwind";
+@import "./components/collab/collab.css";
 
 /*
  * Re-add the standard Tailwind numeric color palette.
@@ -17,6 +18,21 @@
  * semantic tokens the rest of opencode uses) makes those classes resolve.
  */
 @theme {
+  /*
+   * Collab accent bridge (ENG-1).
+   *
+   * Exposes the runtime custom properties from
+   * components/collab/collab.css as Tailwind color utilities
+   * (bg-collab-accent-soft, text-collab-accent, border-collab-accent-line, …).
+   * Referencing a runtime var from @theme is the same technique the host
+   * design system uses in packages/ui/src/styles/tailwind/colors.css, so the
+   * values stay live and re-resolve when the theme flips light/dark.
+   */
+  --color-collab-accent: var(--collab-accent);
+  --color-collab-accent-ink: var(--collab-accent-ink);
+  --color-collab-accent-soft: var(--collab-accent-soft);
+  --color-collab-accent-line: var(--collab-accent-line);
+
   --color-white: #ffffff;
   --color-black: #000000;
 
