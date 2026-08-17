@@ -40,6 +40,23 @@ interface CollabContextValue {
   notes: () => CollabNote[]
   /** Post a side-channel team note (does NOT go to the LLM). */
   postNote: (content: string) => Promise<void>
+  /**
+   * Every suggestion this page has seen dispatched to the LLM, oldest-first.
+   * `lastSuggestion` only keeps the newest one, which loses intermediate
+   * prompts when several are dispatched back to back — the timeline rail needs
+   * all of them.  Page-lifetime only; see activityLog for the same caveat.
+   */
+  promptLog: () => PromptSuggestion[]
+  /**
+   * Session actions derived from the SSE stream (joins, approvals, workspace
+   * and preview lifecycle), oldest-first.
+   *
+   * IMPORTANT: this is an in-memory log of what arrived while THIS page was
+   * open.  The server does not persist an action feed, so a reload starts it
+   * empty.  Prompts survive a reload (GET /collab/session/:id/export); actions
+   * do not.
+   */
+  activityLog: () => CollabActivityEvent[]
 
   // Actions
   submitPrompt: (content: string, model?: string, agent?: string, variant?: string, attachments?: PromptAttachment[]) => Promise<void>
@@ -121,6 +138,24 @@ export interface PreviewHolder {
   }>
 }
 
+/**
+ * One non-prompt thing that happened in the session, derived client-side from
+ * the SSE stream so the timeline rail has an "action" track to render.
+ *
+ * The server broadcasts these as transient events with no timestamp and no
+ * history endpoint, so `at` is the moment this client received the event and
+ * the whole log dies with the page.
+ */
+export interface CollabActivityEvent {
+  id: string
+  /** Epoch ms, client receive time. */
+  at: number
+  /** GitHub login when a person caused it, else null for server actions. */
+  author: string | null
+  /** One-line description, already humanised. */
+  text: string
+}
+
 /** An image/file attached to a collab prompt, mirrored from the native
  *  prompt-input's image parts.  `url` is a `data:` URL (base64). */
 export interface PromptAttachment {
@@ -175,6 +210,8 @@ export function CollabProvider(props: CollabProviderProps) {
   const [unreadMentions, setUnreadMentions] = createSignal<number>(0)
   const [notes, setNotes] = createSignal<CollabNote[]>([])
   const [lastSuggestion, setLastSuggestion] = createSignal<PromptSuggestion | null>(null)
+  const [promptLog, setPromptLog] = createSignal<PromptSuggestion[]>([])
+  const [activityLog, setActivityLog] = createSignal<CollabActivityEvent[]>([])
   const [mcpConfiguredState, setMcpConfiguredState] = createSignal(false)
   // Frontend live-preview state — null when no preview is running.  Server
   // broadcasts a "started" event on SSE (re)connect when one IS running, so
@@ -182,6 +219,25 @@ export function CollabProvider(props: CollabProviderProps) {
   // one-off GET /collab/session/:id/preview/state on mount in case the
   // SSE replay is missed.
   const [previewState, setPreviewState] = createSignal<PreviewStateSnapshot | null>(null)
+
+  /** Cap both logs so a long-lived tab can't grow the heap without bound. */
+  const LOG_CAP = 300
+  let activitySeq = 0
+
+  /**
+   * Append an action row.  Ignores an exact repeat of the previous row within
+   * 5 s: the SSE stream replays state on every reconnect (preview_started in
+   * particular), and a flapping connection would otherwise stutter the rail.
+   */
+  function recordActivity(text: string, author: string | null = null) {
+    setActivityLog((prev) => {
+      const last = prev[prev.length - 1]
+      const now = Date.now()
+      if (last && last.text === text && now - last.at < 5000) return prev
+      const next = prev.concat({ id: `act-${++activitySeq}`, at: now, author, text })
+      return next.length > LOG_CAP ? next.slice(next.length - LOG_CAP) : next
+    })
+  }
 
   function markTyping(githubLogin: string, typing: boolean) {
     setTypingUsers((prev) => {
@@ -435,6 +491,7 @@ export function CollabProvider(props: CollabProviderProps) {
   function handleEvent(event: CollabEvent) {
     switch (event.type) {
       case "collab:participant_joined":
+        recordActivity(`${event.participant.githubLogin} joined as ${event.participant.role}`, event.participant.githubLogin)
         setSession((prev) => {
           if (!prev) return prev
           const exists = prev.participants.find((p) => p.githubId === event.participant.githubId)
@@ -464,6 +521,7 @@ export function CollabProvider(props: CollabProviderProps) {
         break
 
       case "collab:role_changed":
+        recordActivity(`${event.githubLogin} is now a ${event.role}`, event.githubLogin)
         setSession((prev) => {
           if (!prev) return prev
           return {
@@ -500,6 +558,26 @@ export function CollabProvider(props: CollabProviderProps) {
         // Track the most-recently-dispatched suggestion so the panel can display
         // which agent / model / variant is currently active in the LLM session.
         setLastSuggestion(event.suggestion)
+        // …and keep every one of them for the timeline rail.  The server
+        // re-emits this event when a post-restart sweep re-dispatches a
+        // prompt, so drop ids we already hold.
+        setPromptLog((prev) => {
+          if (prev.some((s) => s.id === event.suggestion.id)) return prev
+          const next = prev.concat(event.suggestion)
+          return next.length > LOG_CAP ? next.slice(next.length - LOG_CAP) : next
+        })
+        break
+
+      case "collab:suggestion_approved":
+        recordActivity(`${event.approvedBy} approved a prompt`, event.approvedBy)
+        break
+
+      case "collab:suggestion_rejected":
+        recordActivity(`${event.rejectedBy} rejected a prompt`, event.rejectedBy)
+        break
+
+      case "collab:vote_winner":
+        recordActivity(`Vote pool resolved: ${event.content}`)
         break
 
       case "collab:vote_cast":
@@ -517,11 +595,13 @@ export function CollabProvider(props: CollabProviderProps) {
         break
 
       case "collab:native_session_linked":
+        recordActivity("Agent session linked to the workspace")
         setSession((prev) => (prev ? { ...prev, sessionId: event.sessionId } : prev))
         setNativeSessionDirectory(event.directory)
         break
 
       case "collab:workspace_ready":
+        recordActivity("Workspace ready")
         // Server finished cloning + checking out + pre-warming.  Flip the
         // session's initStatus so the iframe gate in pages/collab/session.tsx
         // can mount the iframe (it ANDs initStatus === "ready" with the
@@ -539,6 +619,7 @@ export function CollabProvider(props: CollabProviderProps) {
         break
 
       case "collab:workspace_failed":
+        recordActivity(`Workspace setup failed: ${event.error}`)
         // Server couldn't init the workspace.  Surface the reason so the
         // recovery panel can display it; a Driver can retry via
         // POST /collab/session/:id/reinit.
@@ -574,6 +655,7 @@ export function CollabProvider(props: CollabProviderProps) {
         break
 
       case "collab:repos_added":
+        recordActivity(`${event.addedBy} added ${event.repos.join(", ")}`, event.addedBy)
         // Repos can only be added by a Driver via PATCH /collab/session/:id.
         // Refetch the session so the SPA's iframe gate (and the iframe URL
         // itself, which encodes the workspace directory) re-evaluates
@@ -587,14 +669,21 @@ export function CollabProvider(props: CollabProviderProps) {
         // "running" depending on whether the dev server has bound its port
         // yet — the launcher transitions via readyPattern / heuristic log
         // match).  Just write the snapshot through.
+        recordActivity(
+          event.state.status === "running"
+            ? `Live preview running on port ${event.state.port}`
+            : `Live preview installing for ${event.state.label}`,
+        )
         setPreviewState(event.state)
         break
 
       case "collab:preview_stopped":
+        recordActivity("Live preview stopped")
         setPreviewState(null)
         break
 
       case "collab:preview_failed":
+        recordActivity(`Live preview failed: ${event.error}`)
         setPreviewState((prev) =>
           prev
             ? { ...prev, status: "failed", errorMessage: event.error }
@@ -691,6 +780,8 @@ export function CollabProvider(props: CollabProviderProps) {
     clearMentions: () => setUnreadMentions(0),
     notes,
     lastSuggestion,
+    promptLog,
+    activityLog,
     viewerRole: () => {
       const sess = session()
       if (!sess || props.meGithubId == null) return "viewer"
