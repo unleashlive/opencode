@@ -82,6 +82,39 @@ message body references ENG-1.
   re-injection from packages/app/src/index.css once nothing references it; sweep
   remaining zinc classes; contrast and touch-target pass.
 
+## S3 data gaps (found, not invented)
+
+The timeline and the status strip render only what the client can already get.
+These are the gaps that showed up while building them. None are worked around
+in the UI; each needs server work in a later pass.
+
+- **No prompt-history endpoint.** `GET /collab/session/:id/queue` and the
+  `collab:queue_update` event both return `collabDb.getPendingPool()`, i.e. only
+  rows with `status = 'pending'`. The rail therefore reads history from
+  `GET /collab/session/:id/export` (`getAllSuggestionsForSession`, all statuses,
+  ordered by `collab_suggestion.created_at`). That endpoint is unpaginated and
+  returns whole prompt bodies, so it is a one-shot fetch per page load, not a
+  poll. A paginated `/history` would replace it.
+- **No action history.** Joins, role changes, approvals, vote resolutions,
+  workspace ready/failed, repo adds and preview lifecycle exist only as
+  transient SSE events. Nothing persists them and no endpoint replays them, so
+  the timeline's action track is in-memory and starts empty after a reload.
+- **No timestamps on SSE events.** `CollabEvent` carries no `at` field, so
+  action rows are stamped with client receive time. Two participants can
+  therefore show slightly different clocks for the same action.
+- **No turn-completion signal.** `collab:prompt_submitted` is broadcast just
+  before `prompt_async` is awaited and nothing is broadcast when the turn ends
+  (`registerQueueExecutor` in `collab/router.ts`). The client cannot tell
+  whether the agent is working, so the status strip shows SSE connection state
+  instead of the busy/idle dot in the locked IA.
+- **No elapsed time or diffstat.** The locked strip calls for elapsed turn time
+  and a running `+adds / -dels / files` count. Neither exists on the collab
+  wire: no turn start/end timestamps, and no diff summary is broadcast from the
+  workspace. Both were left out rather than approximated.
+- **Suggestion status transitions are not timestamped.** `collab_suggestion`
+  has `created_at` only, so a prompt is placed on the timeline at authoring
+  time, not at approval or dispatch time.
+
 ## Verification
 
 Local dev (see .env.example; unauthenticated local mode + seeded dev cookie):
