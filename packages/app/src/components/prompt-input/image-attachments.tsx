@@ -15,7 +15,11 @@ const imageClass =
   "size-16 rounded-md object-cover border border-border-base hover:border-border-strong-base transition-colors"
 const removeClass =
   "absolute -top-1.5 -right-1.5 size-5 rounded-full bg-surface-raised-stronger-non-alpha border border-border-base flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-surface-raised-base-hover"
-const nameClass = "absolute bottom-0 left-0 right-0 px-1 py-0.5 bg-black/50 rounded-b-md"
+// Scrim + label on semantic tokens: the stock Tailwind palette is not part of
+// this app's theme (packages/ui wipes it with `--color-*: initial`), so the
+// black scrim and white label this used to carry generated no CSS and the
+// filename sat unreadable on the thumbnail.
+const nameClass = "absolute bottom-0 left-0 right-0 px-1 py-0.5 bg-background-base/70 rounded-b-md"
 
 export const PromptImageAttachments: Component<PromptImageAttachmentsProps> = (props) => {
   return (
@@ -49,7 +53,7 @@ export const PromptImageAttachments: Component<PromptImageAttachmentsProps> = (p
                   <Icon name="close" class="size-3 text-text-weak" />
                 </button>
                 <div class={nameClass}>
-                  <span class="text-10-regular text-white truncate block">{attachment.filename}</span>
+                  <span class="text-10-regular text-text-strong truncate block">{attachment.filename}</span>
                 </div>
               </div>
             </Tooltip>
