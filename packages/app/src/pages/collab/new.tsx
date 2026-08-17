@@ -129,9 +129,16 @@ export default function NewCollabSession() {
     return (await res.json()) as Me
   })
 
+  // Reading a rejected resource re-throws, which would take the whole page to
+  // the error boundary over a failed repo list.  These read the error flag
+  // first, so a network failure degrades to an empty list plus a message.
+  const repoList = () => (repos.error ? [] : (repos() ?? []))
+  const sessionList = () => (sessions.error ? [] : (sessions() ?? []))
+  const currentUser = () => (me.error ? null : (me() ?? null))
+
   /** Returns true if the current user has the driver role in `session`. */
   function canDelete(session: CollabSession): boolean {
-    const user = me()
+    const user = currentUser()
     if (!user) return false
     return session.participants?.some((p) => p.githubId === user.githubId && p.role === "driver") ?? false
   }
@@ -244,7 +251,7 @@ export default function NewCollabSession() {
 
         <div class="ml-auto flex shrink-0 items-center gap-2">
           <ThemeToggle />
-          <Show when={me()}>
+          <Show when={currentUser()}>
             {(user) => (
               <span class="flex items-center gap-1.5">
                 <img
@@ -328,13 +335,13 @@ export default function NewCollabSession() {
                         it.
                       </p>
                     </Show>
-                    <Show when={!repos.loading && !repos.error && (repos()?.length ?? 0) === 0}>
+                    <Show when={!repos.loading && !repos.error && repoList().length === 0}>
                       <p class="text-12-regular text-text-weak">No repositories found in this org.</p>
                     </Show>
 
-                    <Show when={(repos()?.length ?? 0) > 0}>
+                    <Show when={repoList().length > 0}>
                       <div class="flex max-h-44 flex-wrap gap-1.5 overflow-y-auto overscroll-contain" role="group" aria-label="Repositories">
-                        <For each={repos()}>
+                        <For each={repoList()}>
                           {(repo) => {
                             const on = () => selectedRepos().includes(repo.full_name)
                             return (
@@ -435,8 +442,9 @@ export default function NewCollabSession() {
               </section>
 
               <RejoinCard
-                sessions={sessions() ?? []}
+                sessions={sessionList()}
                 loading={sessions.loading}
+                failed={!!sessions.error}
                 canDelete={canDelete}
                 onOpen={(id) => navigate(`/collab/${id}`)}
                 onDelete={(session) => {
@@ -567,6 +575,8 @@ function recencyOf(at: number, now: number): Recency {
 function RejoinCard(props: {
   sessions: CollabSession[]
   loading: boolean
+  /** The session list request failed; say so instead of claiming there are none. */
+  failed: boolean
   canDelete: (session: CollabSession) => boolean
   onOpen: (id: string) => void
   onDelete: (session: CollabSession) => void
@@ -611,8 +621,10 @@ function RejoinCard(props: {
             when={groups().length > 0}
             fallback={
               <div class="px-3 py-6 text-center">
-                <p class="text-12-regular text-text-weak">No sessions yet</p>
-                <p class="mt-1 font-mono text-[10.5px] text-text-weaker">create your first one on the left</p>
+                <p class="text-12-regular text-text-weak">{props.failed ? "Could not load your sessions" : "No sessions yet"}</p>
+                <p class="mt-1 font-mono text-[10.5px] text-text-weaker">
+                  {props.failed ? "reload to try again" : "create your first one on the left"}
+                </p>
               </div>
             }
           >

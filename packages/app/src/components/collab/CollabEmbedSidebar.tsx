@@ -44,8 +44,13 @@ export function CollabEmbedSidebar() {
     return (await res.json()) as CollabSession[]
   })
 
+  // Reading a rejected resource re-throws, which inside the editor iframe
+  // would replace the whole embedded app with an error boundary over a failed
+  // session list.  Read the error flag first and degrade to an empty list.
+  const sessionList = () => (sessions.error ? [] : (sessions() ?? []))
+
   function canDelete(session: CollabSession): boolean {
-    const user = me()
+    const user = me.error ? null : me()
     if (!user) return false
     return session.participants?.some((p) => p.githubId === user.githubId && p.role === "driver") ?? false
   }
@@ -88,10 +93,14 @@ export function CollabEmbedSidebar() {
       <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1">
         <Show when={!sessions.loading} fallback={<p class="px-3 py-3 text-12-regular text-text-weak">Loading sessions…</p>}>
           <Show
-            when={(sessions()?.length ?? 0) > 0}
-            fallback={<p class="px-3 py-6 text-center text-12-regular text-text-weak">No sessions</p>}
+            when={sessionList().length > 0}
+            fallback={
+              <p class="px-3 py-6 text-center text-12-regular text-text-weak">
+                {sessions.error ? "Could not load your sessions" : "No sessions"}
+              </p>
+            }
           >
-            <For each={sessions()}>
+            <For each={sessionList()}>
               {(session) => {
                 const isActive = () => session.id === activeSessionId()
                 return (
