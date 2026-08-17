@@ -1,4 +1,14 @@
+/**
+ * Quick-start dialog for the Collab session page (SKU-1).
+ *
+ * Two tabs of reference material: what the session surfaces do, and the
+ * keyboard shortcuts that work inside the embedded editor.  Shell is the host
+ * dialog (./CollabDialog.tsx); the tab strip and body are collab's.
+ */
+
 import { createSignal, For, Show } from "solid-js"
+import { CollabDialog } from "./CollabDialog"
+import { LABEL_MICRO, SEGMENT_ITEM, SEGMENT_ITEM_ACTIVE, SEGMENT_ITEM_IDLE, SEGMENT_TRACK } from "./ui"
 
 type Tab = "features" | "shortcuts"
 
@@ -128,71 +138,57 @@ export function TutorialDialog(props: { onClose: () => void }) {
   const [tab, setTab] = createSignal<Tab>("features")
 
   return (
-    <div
-      class="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      style="z-index:99999"
-      onClick={props.onClose}
+    <CollabDialog
+      title="Unleash Collab quick start"
+      description="Everything you need to collaborate, in one place."
+      size="large"
+      onClose={props.onClose}
     >
-      <div
-        class="border border-border-weak-base rounded-xl w-full max-w-2xl shadow-2xl bg-background-base flex flex-col"
-        style="position:relative;z-index:100000;max-height:88vh"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div class="flex items-center justify-between px-6 pt-5 pb-3 flex-shrink-0">
-          <div>
-            <h2 class="text-base font-semibold text-text-strong">Unleash Collab — quick start</h2>
-            <p class="text-xs text-text-weak mt-0.5">Everything you need to know to collaborate in one place.</p>
-          </div>
-          <button
-            type="button"
-            onClick={props.onClose}
-            class="p-1.5 rounded hover:bg-background-strong text-text-weak hover:text-text-strong transition-colors"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
+      <div class="flex min-h-0 flex-1 flex-col">
         {/* Tab strip */}
-        <div class="flex gap-1 px-6 pb-3 border-b border-border-weak-base flex-shrink-0">
-          <button
-            type="button"
-            onClick={() => setTab("features")}
-            class={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-              tab() === "features"
-                ? "bg-background-strong text-text-strong"
-                : "text-text-weak hover:text-text-strong"
-            }`}
-          >
-            Features
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("shortcuts")}
-            class={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-              tab() === "shortcuts"
-                ? "bg-background-strong text-text-strong"
-                : "text-text-weak hover:text-text-strong"
-            }`}
-          >
-            Keyboard shortcuts
-          </button>
+        <div class="shrink-0 px-5 pb-3" role="tablist" aria-label="Quick start sections">
+          <div class={SEGMENT_TRACK}>
+            <For
+              each={
+                [
+                  ["features", "Features"],
+                  ["shortcuts", "Keyboard shortcuts"],
+                ] as const
+              }
+            >
+              {([value, label]) => (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={tab() === value}
+                  onClick={() => setTab(value)}
+                  classList={{
+                    [SEGMENT_ITEM]: true,
+                    [SEGMENT_ITEM_ACTIVE]: tab() === value,
+                    [SEGMENT_ITEM_IDLE]: tab() !== value,
+                  }}
+                >
+                  {label}
+                </button>
+              )}
+            </For>
+          </div>
         </div>
 
         {/* Body */}
-        <div class="flex-1 overflow-y-auto min-h-0">
+        <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-border-weak-base">
           <Show when={tab() === "features"}>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-6">
+            <div class="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2">
               <For each={FEATURES}>
                 {(f) => (
-                  <div class="rounded-lg border border-border-weak-base bg-background-stronger p-3">
-                    <div class="flex items-center gap-2 mb-1">
-                      <span class="text-base leading-none">{f.emoji}</span>
-                      <span class="text-xs font-semibold text-text-strong">{f.title}</span>
+                  <div class="rounded-md border border-border-weak-base bg-surface-inset-base p-3">
+                    <div class="mb-1 flex items-center gap-2">
+                      <span aria-hidden="true" class="text-14-regular leading-none">
+                        {f.emoji}
+                      </span>
+                      <span class="text-12-medium text-text-strong">{f.title}</span>
                     </div>
-                    <p class="text-[11px] text-text-weak leading-relaxed">{f.body}</p>
+                    <p class="text-[11px] leading-relaxed text-text-weak">{f.body}</p>
                   </div>
                 )}
               </For>
@@ -200,35 +196,29 @@ export function TutorialDialog(props: { onClose: () => void }) {
           </Show>
 
           <Show when={tab() === "shortcuts"}>
-            <div class="p-6 space-y-6">
-              <p class="text-[11px] text-text-weak -mt-2">
-                Shortcuts below apply <strong class="text-text-strong">inside the editor pane</strong> (the opencode iframe on the right). The leader key is{" "}
-                <kbd class="px-1 py-0.5 rounded bg-background-strong text-text-strong font-mono text-[10px]">Ctrl+X</kbd>
-                {" "}— press it first, then the next key. Hit{" "}
-                <kbd class="px-1 py-0.5 rounded bg-background-strong text-text-strong font-mono text-[10px]">Ctrl+Alt+K</kbd>{" "}
-                inside the editor to see every shortcut.
+            <div class="flex flex-col gap-5 p-5">
+              <p class="text-[11px] leading-relaxed text-text-weak">
+                These apply <strong class="text-text-strong">inside the editor pane</strong>. The leader key is{" "}
+                <Key>Ctrl+X</Key>: press it first, then the next key. Hit <Key>Ctrl+Alt+K</Key> inside the editor to see
+                every shortcut.
               </p>
               <For each={SHORTCUT_GROUPS}>
                 {(group) => (
                   <div>
-                    <h3 class="text-[10px] uppercase tracking-wider font-semibold text-text-weak mb-2">
-                      {group.title}
-                    </h3>
-                    <div class="rounded-lg border border-border-weak-base overflow-hidden divide-y divide-border-weak-base">
+                    <h3 class={`${LABEL_MICRO} mb-2`}>{group.title}</h3>
+                    <div class="divide-y divide-border-weak-base overflow-hidden rounded-md border border-border-weak-base">
                       <For each={group.rows}>
                         {(row) => (
-                          <div class="flex items-center justify-between px-3 py-2 bg-background-stronger">
+                          <div class="flex items-center justify-between gap-3 bg-surface-inset-base px-3 py-2">
                             <span class="text-[11px] text-text-weak">{row.label}</span>
-                            <div class="flex items-center gap-1 flex-shrink-0 ml-3">
+                            <div class="flex shrink-0 items-center gap-1">
                               <For each={row.keys}>
                                 {(k, i) => (
                                   <>
                                     <Show when={i() > 0}>
-                                      <span class="text-[10px] text-text-weak">/</span>
+                                      <span class="text-[10px] text-text-weaker">/</span>
                                     </Show>
-                                    <kbd class="px-1.5 py-0.5 rounded bg-background-strong text-text-strong font-mono text-[10px] border border-border-weak-base whitespace-nowrap">
-                                      {k}
-                                    </kbd>
+                                    <Key>{k}</Key>
                                   </>
                                 )}
                               </For>
@@ -241,37 +231,34 @@ export function TutorialDialog(props: { onClose: () => void }) {
                 )}
               </For>
 
-              <div class="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5">
-                <p class="text-[11px] text-amber-300/80 leading-relaxed">
-                  <strong class="text-amber-300">Tip:</strong> Customize any keybind in{" "}
-                  <code class="font-mono text-[10px]">~/.config/opencode/opencode.json</code> under{" "}
-                  <code class="font-mono text-[10px]">keybinds</code>. Set a value to{" "}
-                  <code class="font-mono text-[10px]">"none"</code> to disable it.
-                </p>
-              </div>
+              <p class="rounded-md border border-border-warning-base bg-surface-warning-weak px-3 py-2.5 text-[11px] leading-relaxed text-text-on-warning-base">
+                <strong>Tip:</strong> customize any keybind in{" "}
+                <code class="font-mono text-[10px]">~/.config/opencode/opencode.json</code> under{" "}
+                <code class="font-mono text-[10px]">keybinds</code>. Set a value to{" "}
+                <code class="font-mono text-[10px]">"none"</code> to disable it.
+              </p>
+
+              <a
+                href="https://opencode.ai/docs/keybinds/"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-[11px] text-text-weak underline-offset-2 outline-none transition-colors duration-150 ease-out hover:text-text-strong hover:underline focus-visible:ring-2 focus-visible:ring-collab-accent-line motion-reduce:transition-none"
+              >
+                Full keybinds reference
+              </a>
             </div>
           </Show>
         </div>
-
-        {/* Footer */}
-        <div class="flex justify-between items-center px-6 py-3 border-t border-border-weak-base flex-shrink-0">
-          <a
-            href="https://opencode.ai/docs/keybinds/"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="text-[11px] text-text-weak hover:text-text-strong underline-offset-2 hover:underline transition-colors"
-          >
-            Full keybinds reference ↗
-          </a>
-          <button
-            type="button"
-            onClick={props.onClose}
-            class="px-3 py-1.5 text-xs rounded-md text-text-weak hover:text-text-strong transition-colors"
-          >
-            Close
-          </button>
-        </div>
       </div>
-    </div>
+    </CollabDialog>
+  )
+}
+
+/** Keycap: mono, inset, hairline. */
+function Key(props: { children: string }) {
+  return (
+    <kbd class="whitespace-nowrap rounded border border-border-weak-base bg-surface-inset-strong px-1.5 py-0.5 font-mono text-[10px] text-text-strong">
+      {props.children}
+    </kbd>
   )
 }

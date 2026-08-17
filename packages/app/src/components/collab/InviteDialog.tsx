@@ -1,6 +1,14 @@
+/**
+ * Invite dialog for /collab/:id (SKU-1).
+ *
+ * Mints a role-scoped invite link (72h) and offers it for copying.  The shell
+ * is the host dialog (see ./CollabDialog.tsx); only the body is collab's.
+ */
+
 import { createSignal, Show } from "solid-js"
 import { useCollab } from "@/context/collab"
-import { BTN_PRIMARY } from "./ui"
+import { CollabDialog } from "./CollabDialog"
+import { BTN_GHOST, BTN_PRIMARY, FIELD, LABEL_MICRO } from "./ui"
 
 export function InviteDialog(props: { onClose: () => void }) {
   const collab = useCollab()
@@ -22,70 +30,45 @@ export function InviteDialog(props: { onClose: () => void }) {
   }
 
   return (
-    // Uses SPA theme tokens (bg-background-base, text-text-strong, etc.)
-    // so the dialog tracks the user's light/dark preference rather than
-    // forcing dark.  Keeps the inline z-index workaround — iframes promote
-    // themselves to their own composited stacking context and z-50 wasn't
-    // enough to cover the opencode iframe sitting underneath.
-    <div
-      class="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      style="z-index:99999"
-      onClick={props.onClose}
-    >
-      <div
-        class="border border-border-weak-base rounded-xl p-6 w-full max-w-md shadow-2xl bg-background-base"
-        style="position:relative;z-index:100000"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 class="text-base font-semibold text-text-strong mb-4">Invite to Collab Session</h2>
-
-        <div class="mb-4">
-          <label class="text-xs text-text-weak block mb-1.5">Role</label>
+    <CollabDialog title="Invite to this session" onClose={props.onClose} fit>
+      <div class="flex flex-col gap-4 px-5 pb-5">
+        <div class="flex flex-col gap-1.5">
+          <label class={LABEL_MICRO} for="collab-invite-role">
+            Role
+          </label>
           <select
-            class="w-full bg-background-stronger border border-border-weak-base text-text-strong rounded-lg px-3 py-2 text-sm"
+            id="collab-invite-role"
+            class={FIELD}
             value={role()}
             onChange={(e) => setRole(e.currentTarget.value)}
           >
-            <option value="driver">Driver — can create and approve prompts</option>
-            <option value="contributor">Contributor — can suggest prompts and vote</option>
-            <option value="viewer">Viewer — read-only access</option>
+            <option value="driver">Driver, can create and approve prompts</option>
+            <option value="contributor">Contributor, can suggest prompts and vote</option>
+            <option value="viewer">Viewer, read only access</option>
           </select>
         </div>
 
         <Show
           when={inviteUrl()}
           fallback={
-            <button
-              onClick={generate}
-              class={`${BTN_PRIMARY} w-full py-2 text-sm`}
-            >
+            <button type="button" autofocus onClick={generate} class={`${BTN_PRIMARY} h-8 w-full px-3`}>
               Generate invite link
             </button>
           }
         >
-          <div class="bg-background-stronger rounded-lg p-3 mb-3">
-            <div class="text-xs text-text-weak mb-1">Invite link (expires in 72 hours)</div>
-            <div class="text-xs font-mono text-text-strong break-all">{inviteUrl()}</div>
-          </div>
-          <button
-            onClick={copy}
-            class={`w-full font-medium py-2 rounded-lg text-sm transition-colors ${
-              copied()
-                ? "bg-green-600 text-white"
-                : "bg-background-strong hover:bg-background-stronger text-text-strong"
-            }`}
-          >
-            {copied() ? "Copied!" : "Copy link"}
-          </button>
+          {(url) => (
+            <div class="flex flex-col gap-2">
+              <div class="rounded-md border border-border-weak-base bg-surface-inset-base px-3 py-2">
+                <p class={LABEL_MICRO}>Invite link, expires in 72 hours</p>
+                <p class="mt-1 break-all font-mono text-[10.5px] text-text-strong">{url()}</p>
+              </div>
+              <button type="button" onClick={copy} class={`${BTN_GHOST} h-8 w-full px-3`}>
+                {copied() ? "Copied" : "Copy link"}
+              </button>
+            </div>
+          )}
         </Show>
-
-        <button
-          onClick={props.onClose}
-          class="mt-3 w-full text-xs text-text-weak hover:text-text-strong py-1"
-        >
-          Close
-        </button>
       </div>
-    </div>
+    </CollabDialog>
   )
 }
