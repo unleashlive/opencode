@@ -321,7 +321,7 @@ export function CollabProvider(props: CollabProviderProps) {
             : prev,
         )
       }
-      fetchSession()
+      void fetchSession()
     }
 
     es.onerror = () => {
@@ -418,7 +418,7 @@ export function CollabProvider(props: CollabProviderProps) {
     }
     function start() {
       if (timer) return
-      pollOnce()
+      void pollOnce()
       timer = setInterval(pollOnce, 4000)
     }
     function stop() {
@@ -466,7 +466,7 @@ export function CollabProvider(props: CollabProviderProps) {
     }
     function start() {
       if (timer) return
-      pollOnce()
+      void pollOnce()
       timer = setInterval(pollOnce, 5000)
     }
     function stop() {
@@ -632,7 +632,7 @@ export function CollabProvider(props: CollabProviderProps) {
         // hadn't completed yet so availablePreview was null and the
         // PreviewLauncher button was hidden.  After workspace_ready it
         // should populate — fetchSession picks up the updated value.
-        fetchSession()
+        void fetchSession()
         break
 
       case "collab:workspace_failed":
@@ -677,7 +677,7 @@ export function CollabProvider(props: CollabProviderProps) {
         // Refetch the session so the SPA's iframe gate (and the iframe URL
         // itself, which encodes the workspace directory) re-evaluates
         // against the new repo list.
-        fetchSession()
+        void fetchSession()
         break
 
       // ── Preview launcher events ────────────────────────────────────────
@@ -854,7 +854,7 @@ export function CollabProvider(props: CollabProviderProps) {
       const res = await api("", "PATCH", { repos })
       const data = (await res.json()) as { added: string[]; warnings?: Array<{ repo: string; message: string }> }
       // Optimistically refresh; SSE will also fire collab:repos_added.
-      fetchSession()
+      void fetchSession()
       return data
     },
     async deleteSession() {

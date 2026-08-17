@@ -67,7 +67,7 @@ export function CollabEmbedSidebar() {
       goToLanding()
       return
     }
-    refetch()
+    void refetch()
   }
 
   return (

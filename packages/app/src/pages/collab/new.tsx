@@ -171,7 +171,7 @@ export default function NewCollabSession() {
       setDeleteError(`Could not delete "${session.name}" (HTTP ${res.status})${body ? `: ${body}` : ""}`)
       return
     }
-    refetchSessions()
+    void refetchSessions()
   }
 
   async function handleSubmit(e: Event) {
