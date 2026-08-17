@@ -19,6 +19,7 @@
 
 import { createSignal, createMemo, Show, For, onCleanup } from "solid-js"
 import { useCollab } from "@/context/collab"
+import { renderMentions } from "./mentions"
 import type { Participant, CollabNote } from "@opencode-ai/collab"
 
 /** Match the `@<partial>` token at the current caret — only when the
@@ -44,34 +45,6 @@ function matchActiveMention(value: string, caret: number): { start: number; part
     i--
   }
   return null
-}
-
-/** Render content with @-tokens highlighted as inline blue pills. */
-function renderMentions(text: string) {
-  const RE = /(^|\s)(@[A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/g
-  const parts: Array<string | { mention: string }> = []
-  let last = 0
-  let m: RegExpExecArray | null
-  RE.lastIndex = 0
-  while ((m = RE.exec(text)) !== null) {
-    const start = m.index + m[1]!.length
-    if (start > last) parts.push(text.slice(last, start))
-    parts.push({ mention: m[2]! })
-    last = RE.lastIndex
-  }
-  if (last < text.length) parts.push(text.slice(last))
-  return parts.map((p) =>
-    typeof p === "string" ? (
-      p
-    ) : (
-      <span
-        class="inline-block px-1 rounded font-medium"
-        style={{ "background-color": "rgba(96,165,250,0.18)", color: "#60a5fa" }}
-      >
-        {p.mention}
-      </span>
-    ),
-  )
 }
 
 function relativeTime(date: Date): string {

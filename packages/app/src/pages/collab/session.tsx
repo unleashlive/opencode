@@ -33,6 +33,7 @@ import { PreviewLauncher } from "@/components/collab/PreviewLauncher"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import type { CollabRole, Participant, PromptSuggestion, RepoPrResult } from "@opencode-ai/collab"
 import { BTN_PRIMARY, BTN_SUCCESS, BTN_SECONDARY, PILL_BRAND } from "@/components/collab/ui"
+import { renderMentions } from "@/components/collab/mentions"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -526,37 +527,6 @@ function PromptInput(props: {
 /** The fixed set of emoji shown in the reaction bar (kept in sync with
  *  REACTION_EMOJIS in packages/collab/src/types.ts). */
 const REACTION_BAR: readonly string[] = ["👍", "👎", "🔥", "🚀", "❤️", "😄"]
-
-/** Match GitHub-style @-mentions (1–39 chars from [A-Za-z0-9-], start
- *  with alnum).  Mirrors the server-side MENTION_RE in mentions.ts. */
-const MENTION_RE = /(^|\s)(@[A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/g
-
-/** Render free-text content with @-mentions highlighted as inline pills. */
-function renderMentions(text: string) {
-  const parts: Array<string | { mention: string }> = []
-  let lastIndex = 0
-  MENTION_RE.lastIndex = 0
-  let m: RegExpExecArray | null
-  while ((m = MENTION_RE.exec(text)) !== null) {
-    const start = m.index + m[1]!.length // skip the leading whitespace/start
-    if (start > lastIndex) parts.push(text.slice(lastIndex, start))
-    parts.push({ mention: m[2]! })
-    lastIndex = MENTION_RE.lastIndex
-  }
-  if (lastIndex < text.length) parts.push(text.slice(lastIndex))
-  return parts.map((p) =>
-    typeof p === "string" ? (
-      p
-    ) : (
-      <span
-        class="inline-block px-1 rounded font-medium"
-        style={{ "background-color": "rgba(96,165,250,0.18)", color: "#60a5fa" }}
-      >
-        {p.mention}
-      </span>
-    ),
-  )
-}
 
 function QueueItem(props: {
   suggestion: PromptSuggestion
