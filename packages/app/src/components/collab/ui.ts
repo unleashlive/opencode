@@ -59,6 +59,17 @@ export const BTN_ICON =
   " hover:bg-surface-base-hover hover:text-icon-strong-base active:bg-surface-base-active" +
   " disabled:text-icon-disabled"
 
+/**
+ * Destructive icon button (delete a session from a list row).  Same 28px
+ * square as BTN_ICON with critical ink on hover; kept as its own recipe rather
+ * than BTN_ICON plus an override, so two `hover:text-*` utilities never race.
+ */
+export const BTN_ICON_CRITICAL =
+  BTN_BASE +
+  " size-7 shrink-0 gap-0 p-0 border-transparent bg-transparent text-icon-base" +
+  " hover:bg-surface-critical-weak hover:text-text-on-critical-base active:bg-surface-base-active" +
+  " disabled:text-icon-disabled"
+
 /** The "Collab" badge. The only place the accent is used as a fill. */
 export const PILL_BRAND =
   "inline-flex items-center gap-1 rounded-md border border-collab-accent-line px-1.5 py-0.5 " +

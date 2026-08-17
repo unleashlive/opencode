@@ -1,23 +1,74 @@
 /**
- * /collab/new — Create a new Collab Session
+ * /collab/new — the Collab landing page (SKU-1 IA)
  *
- * Layout:
- *  ┌──────────────────┬────────────────────────────────────────┐
- *  │  Rejoin Session  │  New Collab Session (form)             │
- *  │    (1/4)         │            (3/4)                       │
- *  └──────────────────┴────────────────────────────────────────┘
+ *  ┌──────────────────────────────────────────────────────────────────┐
+ *  │ Top bar: badge + wordmark, theme toggle, identity, sign out       │
+ *  ├──────────────────────────────────────────────────────────────────┤
+ *  │ Hero: what this is, in one line                                   │
+ *  ├────────────────────────────────────┬─────────────────────────────┤
+ *  │ Create session (form card)         │ Rejoin (grouped sessions)   │
+ *  └────────────────────────────────────┴─────────────────────────────┘
+ *
+ * The create form comes first in the DOM, so it is also what a phone shows
+ * first: the page exists to start a session, rejoining is the secondary path.
+ *
+ * Server credentials are one quiet status line at the foot of the form card
+ * rather than a banner above it. Nothing about the container's Claude auth
+ * blocks creating a session, so it does not get banner weight.
  */
 
-import { createSignal, createResource, onMount, For, Show } from "solid-js"
+import { createMemo, createResource, createSignal, For, onMount, Show } from "solid-js"
 import { useNavigate } from "@solidjs/router"
 import type { CollabSession } from "@opencode-ai/collab"
-import { BTN_PRIMARY, BTN_SECONDARY, PILL_BRAND } from "@/components/collab/ui"
+import { CollabDialog, ConfirmDialog } from "@/components/collab/CollabDialog"
+import { Chevron } from "@/components/collab/glyphs"
+import { ThemeToggle } from "@/components/collab/ThemeToggle"
+import { dayKey } from "@/components/collab/timeline-utils"
+import {
+  BTN_GHOST,
+  BTN_ICON,
+  BTN_ICON_CRITICAL,
+  BTN_PRIMARY,
+  CARD,
+  CHIP,
+  CHIP_SELECT,
+  CHIP_SELECT_OFF,
+  CHIP_SELECT_ON,
+  FIELD,
+  LABEL_MICRO,
+  PILL_BRAND,
+  SEGMENT_ITEM,
+  SEGMENT_ITEM_ACTIVE,
+  SEGMENT_ITEM_IDLE,
+  SEGMENT_TRACK,
+  TEXT_ACTION,
+} from "@/components/collab/ui"
 
 interface OrgRepo {
   full_name: string
   name: string
   description?: string | null
   private?: boolean
+}
+
+interface Me {
+  githubId: number
+  githubLogin: string
+}
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+
+/** JSON puts Dates on the wire as strings; the types still say Date. */
+function epoch(value: Date | string | number | null | undefined): number {
+  if (value == null) return 0
+  if (value instanceof Date) return value.getTime()
+  if (typeof value === "number") return value
+  const parsed = Date.parse(value)
+  return Number.isNaN(parsed) ? 0 : parsed
+}
+
+function avatarUrl(login: string, size = 48): string {
+  return `https://github.com/${login}.png?size=${size}`
 }
 
 export default function NewCollabSession() {
@@ -30,7 +81,7 @@ export default function NewCollabSession() {
   const [submitting, setSubmitting] = createSignal(false)
   const [error, setError] = createSignal<string | null>(null)
   const [authed, setAuthed] = createSignal(false)
-  // 409-conflict modal state.  Server returns this when the user typed a
+  // 409-conflict dialog state.  Server returns this when the user typed a
   // branch name like `collab/feature-x` and a linked repo already has a
   // `collab` leaf branch (refs/heads layout collision — see
   // packages/opencode/src/collab/branch-resolve.ts).
@@ -39,6 +90,9 @@ export default function NewCollabSession() {
     suggested: string
     message: string
   } | null>(null)
+  // Session the user asked to delete, held until the confirm dialog resolves.
+  const [pendingDelete, setPendingDelete] = createSignal<CollabSession | null>(null)
+  const [deleteError, setDeleteError] = createSignal<string | null>(null)
 
   // Check auth immediately on mount — redirect to GitHub OAuth if not logged in
   onMount(async () => {
@@ -58,7 +112,7 @@ export default function NewCollabSession() {
     return (await res.json()) as OrgRepo[]
   })
 
-  // Load existing sessions for the "Rejoin Session" sidebar
+  // Load existing sessions for the Rejoin card
   const [sessions, { refetch: refetchSessions }] = createResource(authed, async (ready) => {
     if (!ready) return []
     const res = await fetch("/collab/session")
@@ -72,30 +126,22 @@ export default function NewCollabSession() {
     if (!ready) return null
     const res = await fetch("/collab/me")
     if (!res.ok) return null
-    return (await res.json()) as { githubId: number; githubLogin: string }
+    return (await res.json()) as Me
   })
 
   /** Returns true if the current user has the driver role in `session`. */
   function canDelete(session: CollabSession): boolean {
     const user = me()
     if (!user) return false
-    return session.participants?.some(
-      (p) => p.githubId === user.githubId && p.role === "driver",
-    ) ?? false
+    return session.participants?.some((p) => p.githubId === user.githubId && p.role === "driver") ?? false
   }
 
   /** Soft-delete a collab session.  Server also wipes the workspace clone. */
-  async function deleteSession(e: MouseEvent, sessionId: string, sessionName: string) {
-    // Stop the row's onClick (which navigates into the session) from firing.
-    e.stopPropagation()
-    e.preventDefault()
-    if (!confirm(`Delete "${sessionName}"?\n\nThis removes the cloned workspace and cannot be undone.`)) {
-      return
-    }
-    const res = await fetch(`/collab/session/${sessionId}`, { method: "DELETE" })
+  async function deleteSession(session: CollabSession) {
+    const res = await fetch(`/collab/session/${session.id}`, { method: "DELETE" })
     if (!res.ok) {
       const body = await res.text().catch(() => "")
-      alert(`Failed to delete session (HTTP ${res.status})${body ? ": " + body : ""}`)
+      setDeleteError(`Could not delete "${session.name}" (HTTP ${res.status})${body ? `: ${body}` : ""}`)
       return
     }
     refetchSessions()
@@ -110,7 +156,7 @@ export default function NewCollabSession() {
     await submitCreate(branch().trim() || undefined)
   }
 
-  /** Inner submit — extracted so the 409 conflict modal can resubmit with the
+  /** Inner submit — extracted so the 409 conflict dialog can resubmit with the
    *  server-suggested branch name without re-running the form-validation
    *  guards. */
   async function submitCreate(branchOverride: string | undefined) {
@@ -133,7 +179,7 @@ export default function NewCollabSession() {
       }
       if (res.status === 409) {
         // Branch collision on a user-typed name.  Surface the suggestion
-        // modal so the user can accept the auto-rewrite or edit their
+        // dialog so the user can accept the auto-rewrite or edit their
         // branch input.
         const body = (await res.json().catch(() => ({}))) as {
           error?: string
@@ -153,10 +199,7 @@ export default function NewCollabSession() {
       if (res.status === 502) {
         // GitHub API probe failed.  No DB row was created; user can retry.
         const body = (await res.json().catch(() => ({}))) as { error?: string }
-        setError(
-          body.error ??
-            "Could not reach GitHub to verify the branch name.  Please retry in a moment.",
-        )
+        setError(body.error ?? "Could not reach GitHub to verify the branch name. Please retry in a moment.")
         return
       }
       if (!res.ok) {
@@ -173,7 +216,7 @@ export default function NewCollabSession() {
     }
   }
 
-  /** Driver clicked "Use suggested" in the conflict modal. */
+  /** Driver clicked "Use suggested" in the conflict dialog. */
   async function acceptSuggestedBranch() {
     const conflict = branchConflict()
     if (!conflict) return
@@ -183,430 +226,523 @@ export default function NewCollabSession() {
   }
 
   function toggleRepo(fullName: string) {
-    setSelectedRepos((prev) =>
-      prev.includes(fullName) ? prev.filter((r) => r !== fullName) : [...prev, fullName],
-    )
+    setSelectedRepos((prev) => (prev.includes(fullName) ? prev.filter((r) => r !== fullName) : [...prev, fullName]))
+  }
+
+  async function signOut() {
+    await fetch("/collab/auth/logout", { method: "POST" })
+    window.location.href = "/collab/auth/github?next=/collab/new"
   }
 
   return (
-    <div class="h-dvh bg-zinc-950 text-zinc-100 flex flex-col md:flex-row overflow-hidden">
+    <div class="flex h-dvh flex-col overflow-hidden bg-background-base text-text-base">
+      {/* ── Top bar ──────────────────────────────────────────────────────── */}
+      <header class="flex h-12 shrink-0 items-center gap-2 border-b border-border-weak-base bg-surface-base px-3">
+        {/* Not a link, unlike the session top bar: /collab/new is this page. */}
+        <span class={`${PILL_BRAND} shrink-0`}>Collab</span>
+        <span class="text-14-medium text-text-strong">Unleash</span>
 
-      {/* ── LEFT: Rejoin Session sidebar (1/4 on desktop; a capped, scrollable
-            section below the form on mobile via `order`) ──────────────────── */}
-      <div class="w-full md:w-72 flex-shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-zinc-800 bg-zinc-900/40 max-h-[40vh] md:max-h-none">
-
-        {/* Sidebar header */}
-        <div class="px-4 py-4 border-b border-zinc-800 flex-shrink-0">
-          <div class="flex items-center gap-2 mb-0.5">
-            {/* Consistent with the session-page header: the Collab pill links
-                home so users always have a quick way to get back.  Forces a
-                full page navigation (see comment on the same pill in
-                pages/collab/session.tsx for why). */}
-            <a
-              href="/collab/new"
-              title="Back to your collab sessions"
-              onClick={(e) => {
-                e.preventDefault()
-                window.location.href = "/collab/new"
-              }}
-              class={PILL_BRAND}
-            >
-              Collab
-            </a>
-            <button
-              onClick={async () => {
-                await fetch("/collab/auth/logout", { method: "POST" })
-                window.location.href = "/collab/auth/github?next=/collab/new"
-              }}
-              title="Sign out and re-authenticate with GitHub"
-              class="ml-auto p-1 rounded text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800 transition-colors"
-            >
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
-              </svg>
-            </button>
-          </div>
-          <h2 class="text-sm font-semibold text-zinc-100">Rejoin Session</h2>
-          <p class="text-xs text-zinc-500 mt-0.5">Your previous coding sessions</p>
+        <div class="ml-auto flex shrink-0 items-center gap-2">
+          <ThemeToggle />
+          <Show when={me()}>
+            {(user) => (
+              <span class="flex items-center gap-1.5">
+                <img
+                  src={avatarUrl(user().githubLogin)}
+                  alt=""
+                  class="size-6 rounded-full border border-border-weak-base bg-surface-inset-base"
+                />
+                <span class="hidden font-mono text-[10.5px] text-text-weak sm:inline">{user().githubLogin}</span>
+              </span>
+            )}
+          </Show>
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            aria-label="Sign out and re-authenticate with GitHub"
+            title="Sign out and re-authenticate with GitHub"
+            class={BTN_ICON}
+          >
+            <svg class="size-4" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"
+              />
+            </svg>
+          </button>
         </div>
+      </header>
 
-        {/* Session list */}
-        <div class="flex-1 overflow-y-auto py-2">
-          <Show when={!authed()}>
-            <div class="flex items-center gap-2 px-4 py-3 text-xs text-zinc-600">
-              <svg class="w-3 h-3 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-              </svg>
-              Signing in…
-            </div>
-          </Show>
-
-          <Show when={authed() && sessions.loading}>
-            <div class="px-4 py-3 text-xs text-zinc-600">Loading sessions…</div>
-          </Show>
-
-          <Show when={authed() && !sessions.loading && (sessions()?.length ?? 0) === 0}>
-            <div class="px-4 py-6 text-center">
-              <div class="w-10 h-10 rounded-full bg-zinc-800/60 flex items-center justify-center mx-auto mb-3">
-                <svg class="w-5 h-5 text-zinc-600" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
-                </svg>
-              </div>
-              <p class="text-xs text-zinc-600">No sessions yet</p>
-              <p class="text-[10px] text-zinc-700 mt-1">Create your first session →</p>
-            </div>
-          </Show>
-
-          <Show when={authed() && !sessions.loading && (sessions()?.length ?? 0) > 0}>
-            <For each={sessions()}>
-              {(session) => (
-                // Outer is a div (not a button) because we nest a real <button>
-                // for the delete X — nested buttons are invalid HTML.
-                <div
-                  onClick={() => navigate(`/collab/${session.id}`)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault()
-                      navigate(`/collab/${session.id}`)
-                    }
-                  }}
-                  class="relative w-full text-left px-4 py-3 hover:bg-zinc-800/60 transition-colors group border-b border-zinc-800/40 last:border-0 cursor-pointer"
-                >
-                  {/* Delete X — only visible to Drivers, fades in on row hover */}
-                  <Show when={canDelete(session)}>
-                    <button
-                      type="button"
-                      onClick={(e) => deleteSession(e, session.id, session.name)}
-                      title="Delete session"
-                      aria-label={`Delete ${session.name}`}
-                      class="absolute top-2 right-2 p-1 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800/80 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
-                    >
-                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </Show>
-
-                  {/* Session name + open arrow.  pr-6 reserves space for the X. */}
-                  <div class="flex items-start justify-between gap-2 mb-1.5 pr-6">
-                    <span class="text-sm font-medium text-zinc-200 group-hover:text-white transition-colors leading-snug">
-                      {session.name}
-                    </span>
-                    <svg
-                      class="w-3.5 h-3.5 text-zinc-600 group-hover:text-zinc-400 flex-shrink-0 mt-0.5 transition-colors group-hover:opacity-0"
-                      fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"
-                    >
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
-                    </svg>
-                  </div>
-
-                  {/* Repos */}
-                  <Show
-                    when={(session.repos?.length ?? 0) > 0}
-                    fallback={
-                      <span class="text-[10px] text-zinc-700 italic">No repos linked</span>
-                    }
-                  >
-                    <div class="flex flex-wrap gap-1">
-                      <For each={session.repos}>
-                        {(repo) => (
-                          <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700/50 text-[10px] text-zinc-400">
-                            <svg class="w-2.5 h-2.5 text-zinc-600 flex-shrink-0" fill="currentColor" viewBox="0 0 16 16">
-                              <path d="M2 2.5A2.5 2.5 0 014.5 0h8.75a.75.75 0 01.75.75v12.5a.75.75 0 01-.75.75h-2.5a.75.75 0 110-1.5h1.75v-2h-8a1 1 0 00-.714 1.7.75.75 0 01-1.072 1.05A2.495 2.495 0 012 11.5v-9zm10.5-1V9h-8c-.356 0-.694.074-1 .208V2.5a1 1 0 011-1h8z" />
-                            </svg>
-                            {repo.split("/")[1] ?? repo}
-                          </span>
-                        )}
-                      </For>
-                    </div>
-                  </Show>
-
-                  {/* Participants + queue mode badge */}
-                  <div class="flex items-center gap-2 mt-1.5">
-                    <Show when={(session.participants?.length ?? 0) > 0}>
-                      <div class="flex items-center gap-1">
-                        <div class="flex -space-x-1">
-                          <For each={(session.participants ?? []).slice(0, 3)}>
-                            {(p) => (
-                              <img
-                                src={p.githubAvatarUrl || `https://github.com/${p.githubLogin}.png?size=16`}
-                                alt={p.githubLogin}
-                                class="w-4 h-4 rounded-full border border-zinc-900"
-                                title={p.githubLogin}
-                              />
-                            )}
-                          </For>
-                        </div>
-                        <span class="text-[10px] text-zinc-600">
-                          {session.participants?.length ?? 0} member{(session.participants?.length ?? 0) !== 1 ? "s" : ""}
-                        </span>
-                      </div>
-                    </Show>
-                    <span class="ml-auto text-[10px] text-zinc-700 uppercase tracking-wide">
-                      {session.queueMode === "vote" ? "Vote" : "FIFO"}
-                    </span>
-                  </div>
-                </div>
-              )}
-            </For>
-          </Show>
-        </div>
-      </div>
-
-      {/* ── RIGHT: New Session form (3/4 on desktop; first + full-width on
-            mobile so "Create" is at the top) ───────────────────────────────── */}
-      <div class="flex-1 overflow-y-auto order-first md:order-none">
-        <div class="w-full max-w-lg mx-auto px-4 py-8 md:px-8 md:py-12">
-          <div class="mb-8">
-            <h1 class="text-2xl font-semibold mb-1">New Collab Session</h1>
-            <p class="text-sm text-zinc-400">
-              Invite teammates to code together with a shared AI session.
+      {/* ── Body ─────────────────────────────────────────────────────────── */}
+      <main class="min-h-0 flex-1 overflow-y-auto">
+        <div class="mx-auto w-full max-w-5xl px-4 py-8 md:px-8 md:py-12">
+          <div class="mb-8 max-w-2xl">
+            <h1 class="text-20-medium text-text-strong">Code together with a shared agent</h1>
+            <p class="mt-1.5 text-14-regular text-text-weak">
+              One session, one branch, everyone sees the same work. Drivers steer, contributors suggest, viewers watch.
             </p>
           </div>
 
-          <Show when={authed()} fallback={
-            <div class="flex items-center gap-2 text-zinc-500 text-sm">
-              <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-              </svg>
-              Signing in…
-            </div>
-          }>
-            {/* Container-wide Claude credentials banner — shows whether the
-                server has a usable Claude auth file.  Any unleashlive org
-                member can paste a fresh credentials JSON to overwrite it;
-                whoever uploads last wins.  Server-side rate-limited 5/hr. */}
-            <ClaudeCredentialsBanner />
-
-            <form onSubmit={handleSubmit} class="space-y-6">
-              {/* Session name — required field; once filled it gets a
-                  subtle emerald border to match the "validated / satisfied"
-                  semantic emerald carries elsewhere in the collab SPA. */}
-              <div>
-                <label class="block text-sm font-medium text-zinc-300 mb-1.5">Session name</label>
-                <input
-                  type="text"
-                  value={name()}
-                  onInput={(e) => setName(e.currentTarget.value)}
-                  placeholder="e.g. Auth refactor sprint"
-                  class={`w-full bg-zinc-900 border rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none transition-colors ${
-                    name().trim()
-                      ? "border-emerald-600/50 focus:border-emerald-500"
-                      : "border-zinc-700 focus:border-blue-500"
-                  }`}
-                  required
-                />
-              </div>
-
-              {/* Repo selection */}
-              <div>
-                <label class="block text-sm font-medium text-zinc-300 mb-1.5">
-                  Repositories
-                  <span class="text-zinc-600 font-normal ml-1">(optional)</span>
-                </label>
-                <Show when={repos.loading}>
-                  <div class="text-xs text-zinc-600 py-2">Loading org repos…</div>
-                </Show>
-                <Show when={!repos.loading && repos()?.length === 0}>
-                  <div class="text-xs text-zinc-600 py-2">No repositories found in org</div>
-                </Show>
-                <Show when={(repos()?.length ?? 0) > 0}>
-                  {/* Container border subtly emerald once ≥1 repo is
-                      selected — gives a quiet visual confirmation without
-                      adding noise. */}
-                  <div
-                    class={`space-y-1 max-h-48 overflow-y-auto rounded-lg border transition-colors ${
-                      selectedRepos().length > 0
-                        ? "border-emerald-600/40"
-                        : "border-zinc-800"
-                    }`}
-                  >
-                    <For each={repos()}>
-                      {(repo) => (
-                        <label class="flex items-center gap-3 px-3 py-2 hover:bg-zinc-800/50 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={selectedRepos().includes(repo.full_name)}
-                            onChange={() => toggleRepo(repo.full_name)}
-                            class="rounded"
-                          />
-                          <div class="min-w-0">
-                            <div class="text-sm text-zinc-200 truncate">{repo.name}</div>
-                            <Show when={repo.description}>
-                              <div class="text-xs text-zinc-600 truncate">{repo.description}</div>
-                            </Show>
-                          </div>
-                          <Show when={repo.private}>
-                            <span class="ml-auto text-xs text-zinc-600 flex-shrink-0">private</span>
-                          </Show>
-                        </label>
-                      )}
-                    </For>
+          <Show
+            when={authed()}
+            fallback={<p class="text-12-regular text-text-weak">Signing in…</p>}
+          >
+            <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+              {/* Create form first in the DOM: it is the point of the page, and
+                  on a phone it therefore sits above the rejoin list. */}
+              <section class={`${CARD} p-5`}>
+                <form onSubmit={handleSubmit} class="flex flex-col gap-5">
+                  <div class="flex flex-col gap-1.5">
+                    <label class={LABEL_MICRO} for="collab-name">
+                      Session name
+                    </label>
+                    <input
+                      id="collab-name"
+                      type="text"
+                      value={name()}
+                      onInput={(e) => setName(e.currentTarget.value)}
+                      placeholder="Auth refactor sprint"
+                      class={FIELD}
+                      required
+                    />
                   </div>
-                </Show>
-              </div>
 
-              {/* Branch */}
-              <div>
-                <label class="block text-sm font-medium text-zinc-300 mb-1.5">
-                  Git branch
-                  <span class="text-zinc-600 font-normal ml-1">(optional)</span>
-                </label>
-                <input
-                  type="text"
-                  value={branch()}
-                  onInput={(e) => setBranch(e.currentTarget.value)}
-                  placeholder="e.g. collab/drone-api-refactor — leave blank for auto-generated"
-                  class="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blue-500"
-                />
-                <p class="mt-1 text-[11px] text-zinc-600">
-                  Every linked repo will be checked out to this branch.  If empty, a
-                  branch named <code class="text-zinc-400">collab/&lt;slug&gt;-&lt;id&gt;</code> is created from the default branch.
-                </p>
-              </div>
+                  <div class="flex flex-col gap-1.5">
+                    <div class="flex items-center gap-2">
+                      <span class={LABEL_MICRO}>Repositories</span>
+                      <span class="font-mono text-[10.5px] text-text-weaker">optional</span>
+                      <Show when={selectedRepos().length > 0}>
+                        <span class="ml-auto font-mono text-[10.5px] text-text-weak">
+                          {selectedRepos().length} selected
+                        </span>
+                      </Show>
+                    </div>
 
-              {/* Visibility mode */}
-              <div>
-                <label class="block text-sm font-medium text-zinc-300 mb-1.5">
-                  Visibility while typing
-                </label>
-                <div class="space-y-2">
-                  <For each={[
-                    { value: "typing", label: "Typing indicator", desc: 'Shows a pulsing dot next to participants who are composing' },
-                    { value: "submitted", label: "Submitted only", desc: "Others see prompts once you send them" },
-                  ]}>
-                    {(opt) => (
-                      <label class="flex items-start gap-3 p-3 rounded-lg bg-zinc-900 border border-zinc-800 cursor-pointer hover:border-zinc-600">
-                        <input
-                          type="radio"
-                          name="visibility"
-                          value={opt.value}
-                          checked={visibilityMode() === opt.value}
-                          onChange={() => setVisibilityMode(opt.value)}
-                          class="mt-0.5"
-                        />
-                        <div>
-                          <div class="text-sm text-zinc-200">{opt.label}</div>
-                          <div class="text-xs text-zinc-500">{opt.desc}</div>
-                        </div>
+                    <Show when={repos.loading}>
+                      <p class="text-12-regular text-text-weak">Loading org repositories…</p>
+                    </Show>
+                    <Show when={repos.error}>
+                      <p class="text-12-regular text-text-weak">
+                        Could not load the org repositories. You can still create the session and add repos from inside
+                        it.
+                      </p>
+                    </Show>
+                    <Show when={!repos.loading && !repos.error && (repos()?.length ?? 0) === 0}>
+                      <p class="text-12-regular text-text-weak">No repositories found in this org.</p>
+                    </Show>
+
+                    <Show when={(repos()?.length ?? 0) > 0}>
+                      <div class="flex max-h-44 flex-wrap gap-1.5 overflow-y-auto overscroll-contain" role="group" aria-label="Repositories">
+                        <For each={repos()}>
+                          {(repo) => {
+                            const on = () => selectedRepos().includes(repo.full_name)
+                            return (
+                              <button
+                                type="button"
+                                role="checkbox"
+                                aria-checked={on()}
+                                title={repo.description ?? repo.full_name}
+                                onClick={() => toggleRepo(repo.full_name)}
+                                classList={{
+                                  [CHIP_SELECT]: true,
+                                  [CHIP_SELECT_ON]: on(),
+                                  [CHIP_SELECT_OFF]: !on(),
+                                }}
+                              >
+                                <Show when={on()}>
+                                  <span aria-hidden="true" class="leading-none">
+                                    ✓
+                                  </span>
+                                </Show>
+                                <span class="truncate">{repo.name}</span>
+                                <Show when={repo.private}>
+                                  <span class="font-mono text-[10px] text-text-weaker">private</span>
+                                </Show>
+                              </button>
+                            )
+                          }}
+                        </For>
+                      </div>
+                    </Show>
+                  </div>
+
+                  <div class="flex flex-col gap-1.5">
+                    <div class="flex items-center gap-2">
+                      <label class={LABEL_MICRO} for="collab-branch">
+                        Git branch
                       </label>
+                      <span class="font-mono text-[10.5px] text-text-weaker">optional</span>
+                    </div>
+                    <input
+                      id="collab-branch"
+                      type="text"
+                      value={branch()}
+                      onInput={(e) => setBranch(e.currentTarget.value)}
+                      placeholder="collab/drone-api-refactor"
+                      class={`${FIELD} font-mono`}
+                    />
+                    <p class="text-[11px] text-text-weak">
+                      Every linked repo is checked out to this branch. Leave it blank and{" "}
+                      <code class="font-mono text-[10.5px] text-text-strong">collab/&lt;slug&gt;-&lt;id&gt;</code> is
+                      created from the default branch.
+                    </p>
+                  </div>
+
+                  <div class="grid gap-4 sm:grid-cols-2">
+                    <Segmented
+                      label="Queue mode"
+                      value={queueMode()}
+                      onChange={setQueueMode}
+                      hint="FIFO runs prompts in order. Vote pool runs the highest scored first."
+                      options={[
+                        { value: "fifo", label: "FIFO" },
+                        { value: "vote", label: "Vote pool" },
+                      ]}
+                    />
+                    <Segmented
+                      label="Typing visibility"
+                      value={visibilityMode()}
+                      onChange={setVisibilityMode}
+                      hint="Live shows a dot while someone composes. On submit reveals prompts only when sent."
+                      options={[
+                        { value: "typing", label: "Live" },
+                        { value: "submitted", label: "On submit" },
+                      ]}
+                    />
+                  </div>
+
+                  <Show when={error()}>
+                    {(message) => (
+                      <p class="rounded-md border border-border-critical-base bg-surface-critical-weak px-3 py-2 text-12-regular text-text-on-critical-base">
+                        {message()}
+                      </p>
                     )}
-                  </For>
-                </div>
-              </div>
+                  </Show>
 
-              {/* Queue mode */}
-              <div>
-                <label class="block text-sm font-medium text-zinc-300 mb-1.5">Prompt queue mode</label>
-                <div class="space-y-2">
-                  <For each={[
-                    { value: "fifo", label: "FIFO", desc: "Prompts execute in the order they are submitted" },
-                    { value: "vote", label: "Vote Pool", desc: "Team votes on suggestions; highest score executes first" },
-                  ]}>
-                    {(opt) => (
-                      <label class="flex items-start gap-3 p-3 rounded-lg bg-zinc-900 border border-zinc-800 cursor-pointer hover:border-zinc-600">
-                        <input
-                          type="radio"
-                          name="queueMode"
-                          value={opt.value}
-                          checked={queueMode() === opt.value}
-                          onChange={() => setQueueMode(opt.value)}
-                          class="mt-0.5"
-                        />
-                        <div>
-                          <div class="text-sm text-zinc-200">{opt.label}</div>
-                          <div class="text-xs text-zinc-500">{opt.desc}</div>
-                        </div>
-                      </label>
-                    )}
-                  </For>
-                </div>
-              </div>
+                  <button
+                    type="submit"
+                    disabled={submitting() || !name().trim()}
+                    class={`${BTN_PRIMARY} h-9 w-full px-3`}
+                  >
+                    {submitting() ? "Creating…" : "Create session"}
+                  </button>
+                </form>
 
-              <Show when={error()}>
-                <div class="text-sm text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">
-                  {error()}
+                <div class="mt-4 border-t border-border-weak-base pt-3">
+                  <ClaudeCredentialsLine />
                 </div>
-              </Show>
+              </section>
 
-              {/* High-emphasis CTA — elevated with shadow + ring so it reads
-                  as the primary action on the page even after the form fills
-                  out.  Keep the blue family (don't swap to emerald — emerald
-                  carries "approve / live preview" semantics elsewhere in the
-                  collab SPA, e.g. PreviewLauncher's running pill); the
-                  "secondary opencode accent" treatment here is richer blue +
-                  elevation, not a hue swap. */}
-              <button
-                type="submit"
-                disabled={submitting() || !name().trim()}
-                class={`${BTN_PRIMARY} w-full py-3 text-sm`}
-              >
-                {submitting() ? "Creating…" : "Create Collab Session"}
-              </button>
-            </form>
+              <RejoinCard
+                sessions={sessions() ?? []}
+                loading={sessions.loading}
+                canDelete={canDelete}
+                onOpen={(id) => navigate(`/collab/${id}`)}
+                onDelete={(session) => {
+                  setDeleteError(null)
+                  setPendingDelete(session)
+                }}
+              />
+            </div>
           </Show>
         </div>
-      </div>
+      </main>
 
-      {/* Branch-collision modal: opens when POST /collab/session returns 409.
+      {/* Branch-collision dialog: opens when POST /collab/session returns 409.
           The user typed a custom branch name with `/` that conflicts with an
           existing leaf branch in one of the linked repos.  Offer the
           server-suggested slash-flattened name (collab/foo → collab-foo)
           OR let the user edit the input and try again. */}
       <Show when={branchConflict()}>
         {(conflict) => (
-          <div
-            class="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-            style="z-index:99999"
-            onClick={() => setBranchConflict(null)}
-          >
-            <div
-              class="border border-border-weak-base rounded-xl p-6 w-full max-w-md shadow-2xl bg-background-base"
-              style="position:relative;z-index:100000"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <h2 class="text-base font-semibold text-text-strong mb-3">Branch name conflict</h2>
-              <p class="text-sm text-text-weak mb-3 whitespace-pre-wrap">{conflict().message}</p>
-              <p class="text-sm text-text-strong mb-4">
-                Use{" "}
-                <code class="px-1.5 py-0.5 rounded bg-background-stronger text-text-strong">
-                  {conflict().suggested}
-                </code>{" "}
-                instead?
+          <CollabDialog title="Branch name conflict" onClose={() => setBranchConflict(null)} fit>
+            <div class="flex flex-col gap-4 px-5 pb-5">
+              <p class="whitespace-pre-wrap text-12-regular text-text-weak">{conflict().message}</p>
+              <p class="text-12-regular text-text-strong">
+                Use <code class="font-mono text-[10.5px]">{conflict().suggested}</code> instead?
               </p>
-              <div class="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => void acceptSuggestedBranch()}
-                  disabled={submitting()}
-                  class={`${BTN_PRIMARY} flex-1 py-2 text-sm`}
-                >
-                  {submitting() ? "Creating…" : "Use suggested"}
-                </button>
+              <div class="flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => {
                     setBranch(conflict().proposed)
                     setBranchConflict(null)
                   }}
-                  class={`${BTN_SECONDARY} flex-1 py-2 text-sm`}
+                  class={`${BTN_GHOST} h-8 px-3`}
                 >
                   Edit branch name
                 </button>
+                <button
+                  type="button"
+                  autofocus
+                  onClick={() => void acceptSuggestedBranch()}
+                  disabled={submitting()}
+                  class={`${BTN_PRIMARY} h-8 px-3`}
+                >
+                  {submitting() ? "Creating…" : "Use suggested"}
+                </button>
               </div>
             </div>
-          </div>
+          </CollabDialog>
         )}
+      </Show>
+
+      <Show when={pendingDelete()}>
+        {(session) => (
+          <ConfirmDialog
+            title="Delete this session?"
+            body={
+              <>
+                <strong class="text-text-strong">{session().name}</strong> and its cloned workspace are removed. This
+                cannot be undone.
+              </>
+            }
+            confirmLabel="Delete session"
+            destructive
+            onConfirm={() => void deleteSession(session())}
+            onClose={() => setPendingDelete(null)}
+          />
+        )}
+      </Show>
+
+      <Show when={deleteError()}>
+        {(message) => <ConfirmDialog title="Delete failed" body={message()} onClose={() => setDeleteError(null)} />}
       </Show>
     </div>
   )
 }
 
-// ── Claude credentials banner ─────────────────────────────────────────────────
+// ── Segmented control ─────────────────────────────────────────────────────────
+
+function Segmented(props: {
+  label: string
+  hint?: string
+  value: string
+  onChange: (value: string) => void
+  options: ReadonlyArray<{ value: string; label: string }>
+}) {
+  return (
+    <div class="flex flex-col gap-1.5">
+      <span class={LABEL_MICRO}>{props.label}</span>
+      <div class={SEGMENT_TRACK} role="group" aria-label={props.label}>
+        <For each={props.options}>
+          {(option) => (
+            <button
+              type="button"
+              aria-pressed={props.value === option.value}
+              onClick={() => props.onChange(option.value)}
+              classList={{
+                [SEGMENT_ITEM]: true,
+                [SEGMENT_ITEM_ACTIVE]: props.value === option.value,
+                [SEGMENT_ITEM_IDLE]: props.value !== option.value,
+              }}
+            >
+              {option.label}
+            </button>
+          )}
+        </For>
+      </div>
+      <Show when={props.hint}>{(hint) => <p class="text-[11px] text-text-weak">{hint()}</p>}</Show>
+    </div>
+  )
+}
+
+// ── Rejoin card ───────────────────────────────────────────────────────────────
+
+type Recency = "today" | "week" | "earlier"
+
+const RECENCY_LABELS: ReadonlyArray<[Recency, string]> = [
+  ["today", "Today"],
+  ["week", "This week"],
+  ["earlier", "Earlier"],
+]
+
+/** Which bucket a session's creation time falls into, relative to `now`. */
+function recencyOf(at: number, now: number): Recency {
+  if (dayKey(at) === dayKey(now)) return "today"
+  return now - at < WEEK_MS ? "week" : "earlier"
+}
+
+function RejoinCard(props: {
+  sessions: CollabSession[]
+  loading: boolean
+  canDelete: (session: CollabSession) => boolean
+  onOpen: (id: string) => void
+  onDelete: (session: CollabSession) => void
+}) {
+  const now = Date.now()
+  const [openOverrides, setOpenOverrides] = createSignal<Record<string, boolean>>({})
+
+  const groups = createMemo(() => {
+    const byBucket = new Map<Recency, CollabSession[]>()
+    for (const session of [...props.sessions].sort((a, b) => epoch(b.createdAt) - epoch(a.createdAt))) {
+      const bucket = recencyOf(epoch(session.createdAt), now)
+      const list = byBucket.get(bucket)
+      if (list) list.push(session)
+      else byBucket.set(bucket, [session])
+    }
+    return RECENCY_LABELS.filter(([key]) => byBucket.has(key)).map(([key, label]) => ({
+      key,
+      label,
+      sessions: byBucket.get(key)!,
+    }))
+  })
+
+  /** The most recent non-empty group starts expanded; older ones collapse. */
+  const defaultOpen = createMemo(() => groups()[0]?.key)
+
+  function isOpen(key: Recency): boolean {
+    const override = openOverrides()[key]
+    return override === undefined ? key === defaultOpen() : override
+  }
+
+  return (
+    <section class={`${CARD} flex min-h-0 flex-col overflow-hidden`} aria-label="Rejoin a session">
+      <header class="flex shrink-0 items-baseline gap-1.5 border-b border-border-weak-base px-3 py-2.5">
+        <h2 class="text-12-medium text-text-strong">Rejoin</h2>
+        <p class="text-12-regular text-text-weak">your recent sessions</p>
+        <span class="ml-auto font-mono text-[10.5px] text-text-weaker">{props.sessions.length}</span>
+      </header>
+
+      <div class="max-h-[26rem] min-h-0 overflow-y-auto overscroll-contain">
+        <Show when={!props.loading} fallback={<p class="px-3 py-4 text-12-regular text-text-weak">Loading sessions…</p>}>
+          <Show
+            when={groups().length > 0}
+            fallback={
+              <div class="px-3 py-6 text-center">
+                <p class="text-12-regular text-text-weak">No sessions yet</p>
+                <p class="mt-1 font-mono text-[10.5px] text-text-weaker">create your first one on the left</p>
+              </div>
+            }
+          >
+            <For each={groups()}>
+              {(group) => (
+                <section class="border-b border-border-weak-base last:border-b-0">
+                  <button
+                    type="button"
+                    onClick={() => setOpenOverrides((prev) => ({ ...prev, [group.key]: !isOpen(group.key) }))}
+                    aria-expanded={isOpen(group.key)}
+                    class="flex min-h-8 w-full items-center gap-1.5 px-3 py-1.5 text-left outline-none transition-colors duration-150 ease-out hover:bg-surface-base-hover focus-visible:ring-2 focus-visible:ring-collab-accent-line motion-reduce:transition-none"
+                  >
+                    <Chevron open={isOpen(group.key)} />
+                    <span class={LABEL_MICRO}>{group.label}</span>
+                    <span class="ml-auto font-mono text-[10.5px] text-text-weaker">{group.sessions.length}</span>
+                  </button>
+
+                  <Show when={isOpen(group.key)}>
+                    <For each={group.sessions}>
+                      {(session) => (
+                        <SessionRow
+                          session={session}
+                          canDelete={props.canDelete(session)}
+                          onOpen={() => props.onOpen(session.id)}
+                          onDelete={() => props.onDelete(session)}
+                        />
+                      )}
+                    </For>
+                  </Show>
+                </section>
+              )}
+            </For>
+          </Show>
+        </Show>
+      </div>
+    </section>
+  )
+}
+
+function SessionRow(props: {
+  session: CollabSession
+  canDelete: boolean
+  onOpen: () => void
+  onDelete: () => void
+}) {
+  const session = () => props.session
+  const participants = () => session().participants ?? []
+  const repos = () => session().repos ?? []
+
+  return (
+    // Outer is a div, not a button, because we nest a real <button> for the
+    // delete action and nested buttons are invalid HTML.
+    <div
+      onClick={props.onOpen}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" && e.key !== " ") return
+        e.preventDefault()
+        props.onOpen()
+      }}
+      class="group flex cursor-pointer items-start gap-2 px-3 py-2 outline-none transition-colors duration-150 ease-out hover:bg-surface-base-hover focus-visible:ring-2 focus-visible:ring-collab-accent-line motion-reduce:transition-none"
+    >
+      <div class="mt-0.5 flex shrink-0 items-center" aria-hidden="true">
+        <Show
+          when={participants().length > 0}
+          fallback={<span class="size-4 rounded-full border border-border-weak-base bg-surface-inset-base" />}
+        >
+          <For each={participants().slice(0, 3)}>
+            {(p, i) => (
+              <img
+                src={p.githubAvatarUrl || avatarUrl(p.githubLogin, 24)}
+                alt=""
+                title={p.githubLogin}
+                classList={{ "size-4 rounded-full border border-background-base bg-surface-inset-base": true, "-ml-1": i() > 0 }}
+              />
+            )}
+          </For>
+        </Show>
+      </div>
+
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2">
+          <span class="min-w-0 flex-1 truncate text-12-medium text-text-strong">{session().name}</span>
+          <span class="shrink-0 font-mono text-[10.5px] text-text-weaker">{relativeTimeShort(epoch(session().createdAt))}</span>
+        </div>
+        <div class="mt-1 flex flex-wrap items-center gap-1">
+          <Show
+            when={repos().length > 0}
+            fallback={<span class="font-mono text-[10.5px] text-text-weaker">no repos linked</span>}
+          >
+            <For each={repos().slice(0, 2)}>
+              {(repo) => (
+                <span class={CHIP} title={repo}>
+                  {repo.split("/")[1] ?? repo}
+                </span>
+              )}
+            </For>
+            <Show when={repos().length > 2}>
+              <span class="font-mono text-[10.5px] text-text-weaker">+{repos().length - 2}</span>
+            </Show>
+          </Show>
+          <span class={CHIP} title="Prompt queue mode">
+            {session().queueMode === "vote" ? "vote" : "fifo"}
+          </span>
+        </div>
+      </div>
+
+      <Show when={props.canDelete}>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            props.onDelete()
+          }}
+          aria-label={`Delete ${session().name}`}
+          title="Delete session"
+          class={`${BTN_ICON_CRITICAL} opacity-0 group-hover:opacity-100 focus-visible:opacity-100`}
+        >
+          <svg class="size-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </Show>
+    </div>
+  )
+}
+
+// ── Claude credentials status line ────────────────────────────────────────────
 //
 // Surfaces whether the server currently has a usable Claude auth file.  Any
 // authenticated org member can paste a fresh credentials JSON (overwrites
@@ -616,6 +752,10 @@ export default function NewCollabSession() {
 // Per-session credentials would require spawning one opencode process per
 // session (large architectural change); the per-container model is the
 // realistic shape.
+//
+// It is one status line rather than a banner: missing credentials do not block
+// creating a session (the model picker still offers free fallbacks), so this
+// reports state and offers the paste flow, and otherwise stays out of the way.
 //
 // Operator runbook for getting credentials JSON on a Mac:
 //   security find-generic-password -s "Claude Code-credentials" -w
@@ -629,7 +769,7 @@ interface CredentialsStatus {
   bytes?: number
 }
 
-function ClaudeCredentialsBanner() {
+function ClaudeCredentialsLine() {
   const [status, setStatus] = createSignal<CredentialsStatus | null>(null)
   const [showUpload, setShowUpload] = createSignal(false)
   const [json, setJson] = createSignal("")
@@ -679,174 +819,116 @@ function ClaudeCredentialsBanner() {
     }
   }
 
-  return (
-    <div class="mb-6">
-      <Show
-        when={status() !== null}
-        fallback={
-          <div class="text-xs text-zinc-600 px-3 py-2">Checking Claude auth…</div>
-        }
-      >
-        <Show
-          when={status()!.present}
-          fallback={
-            // No credentials present — gentle warning + paste UI.
-            <div class="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
-              <div class="flex items-start gap-2">
-                <svg class="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-                </svg>
-                <div class="flex-1 min-w-0">
-                  <p class="text-sm font-medium text-amber-200">No Claude credentials on the server</p>
-                  <p class="text-xs text-amber-300/80 mt-0.5">
-                    Anthropic models won't be available until someone uploads a credentials file.  You can paste yours now, or skip and use a different model (the model picker shows free fallbacks).
-                  </p>
-                  <Show when={!showUpload()}>
-                    <div class="mt-2 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowUpload(true)}
-                        class="text-xs px-3 py-1.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-amber-100 hover:bg-amber-500/30 transition-colors"
-                      >
-                        Paste credentials
-                      </button>
-                      <span class="text-[11px] text-amber-300/60">or just create a session and skip Anthropic</span>
-                    </div>
-                  </Show>
-                </div>
-              </div>
+  const present = () => status()?.present === true
+  const machineStatus = () => {
+    if (status() === null) return "checking…"
+    if (!present()) return "none · uploads needed"
+    const refreshed = status()?.mtime ? ` · ${relativeTimeShort(status()!.mtime!)}` : ""
+    return `Claude · active${refreshed}`
+  }
 
-              <Show when={showUpload()}>
-                <form onSubmit={upload} class="mt-3 space-y-2">
-                  <details class="text-[11px] text-amber-300/80">
-                    <summary class="cursor-pointer hover:text-amber-200">How to get the JSON (Mac)</summary>
-                    <pre class="mt-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-300 overflow-x-auto">
-{`security find-generic-password -s "Claude Code-credentials" -w`}
-                    </pre>
-                    <p class="mt-1">
-                      Copy the entire output and paste below.  Three shapes are
-                      accepted: Mac keychain dump (nested <code>claudeAiOauth</code>),
-                      flat camelCase <code>{`{accessToken, refreshToken}`}</code>, or
-                      flat snake_case <code>{`{access_token, refresh_token}`}</code>.
-                      Stored on the server's EFS at <code>~/.local/share/opencode/claude-credentials.json</code>;
-                      visible only to the running container.
-                    </p>
-                  </details>
-                  <div class="bg-amber-500/15 border border-amber-500/30 rounded px-2 py-1.5 text-[11px] text-amber-100">
-                    <strong>Shared across all collab sessions.</strong>  These
-                    credentials authenticate every collab session on this
-                    server.  LLM usage will be billed to your Claude account
-                    until someone else uploads their own.  Per-session
-                    isolation is tracked in{" "}
-                    <a
-                      href="https://github.com/unleashlive/opencode/issues/15"
-                      target="_blank"
-                      rel="noreferrer"
-                      class="underline hover:text-amber-200"
-                    >
-                      issue #15
-                    </a>
-                    .
-                  </div>
-                  <textarea
-                    value={json()}
-                    onInput={(e) => setJson(e.currentTarget.value)}
-                    placeholder='{"claudeAiOauth":{"accessToken":"sk-ant-...","refreshToken":"sk-ant-..."}}'
-                    rows={5}
-                    class="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs font-mono text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-amber-500 resize-y"
-                    spellcheck={false}
-                    autocomplete="off"
-                  />
-                  <Show when={uploadErr()}>
-                    <p class="text-[11px] text-red-400">{uploadErr()}</p>
-                  </Show>
-                  <div class="flex items-center gap-2">
-                    <button
-                      type="submit"
-                      disabled={uploading() || !json().trim()}
-                      class="text-xs px-3 py-1.5 rounded-md bg-amber-500/30 border border-amber-400/50 text-amber-50 hover:bg-amber-500/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {uploading() ? "Uploading…" : "Use these credentials"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setShowUpload(false); setJson(""); setUploadErr(null) }}
-                      disabled={uploading()}
-                      class="text-xs px-3 py-1.5 rounded-md text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-50"
-                    >
-                      Skip
-                    </button>
-                  </div>
-                </form>
-              </Show>
-            </div>
-          }
+  return (
+    <div class="flex flex-col gap-2">
+      <div class="flex items-center gap-2">
+        <span
+          aria-hidden="true"
+          classList={{
+            "size-1.5 shrink-0 rounded-full": true,
+            "bg-surface-success-strong": present(),
+            "bg-surface-warning-strong": !present(),
+          }}
+        />
+        <span class="shrink-0 text-12-regular text-text-weak">Server credentials</span>
+        <span class="min-w-0 truncate font-mono text-[10.5px] text-text-weak" title={status()?.email ?? undefined}>
+          {machineStatus()}
+        </span>
+        <button
+          type="button"
+          onClick={() => {
+            setShowUpload((v) => !v)
+            setUploadErr(null)
+          }}
+          aria-expanded={showUpload()}
+          class={`${TEXT_ACTION} ml-auto shrink-0`}
         >
-          {/* Credentials present — quiet green confirmation. */}
-          <div class="flex items-center gap-2 text-xs text-emerald-300/90 bg-emerald-500/5 border border-emerald-500/20 rounded-lg px-3 py-2">
-            <svg class="w-4 h-4 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span class="flex-1">
-              Claude credentials available
-              <Show when={status()!.email}>
-                <span class="text-emerald-400/70"> · {status()!.email}</span>
-              </Show>
-              <Show when={status()!.mtime}>
-                <span class="text-emerald-400/60"> · refreshed {relativeTimeShort(status()!.mtime!)}</span>
-              </Show>
-            </span>
+          {showUpload() ? "Cancel" : present() ? "Replace" : "Paste credentials"}
+        </button>
+      </div>
+
+      <Show when={showUpload()}>
+        <form onSubmit={upload} class="flex flex-col gap-2">
+          <details class="text-[11px] text-text-weak">
+            <summary class="cursor-pointer outline-none hover:text-text-strong focus-visible:ring-2 focus-visible:ring-collab-accent-line">
+              How to get the JSON (Mac)
+            </summary>
+            <pre class="mt-1 overflow-x-auto rounded-md border border-border-weak-base bg-surface-inset-base px-2 py-1.5 font-mono text-[10.5px] text-text-strong">
+{`security find-generic-password -s "Claude Code-credentials" -w`}
+            </pre>
+            <p class="mt-1">
+              Copy the entire output and paste it below. Three shapes are accepted: Mac keychain dump (nested{" "}
+              <code class="font-mono">claudeAiOauth</code>), flat camelCase{" "}
+              <code class="font-mono">{`{accessToken, refreshToken}`}</code>, or flat snake_case{" "}
+              <code class="font-mono">{`{access_token, refresh_token}`}</code>. Stored on the server's EFS at{" "}
+              <code class="font-mono">~/.local/share/opencode/claude-credentials.json</code>, visible only to the
+              running container.
+            </p>
+          </details>
+
+          <p class="rounded-md border border-border-warning-base bg-surface-warning-weak px-2 py-1.5 text-[11px] text-text-on-warning-base">
+            <strong>Shared across all collab sessions.</strong> These credentials authenticate every collab session on
+            this server. LLM usage is billed to your Claude account until someone else uploads their own. Per-session
+            isolation is tracked in{" "}
+            <a
+              href="https://github.com/unleashlive/opencode/issues/15"
+              target="_blank"
+              rel="noreferrer"
+              class="underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-collab-accent-line"
+            >
+              issue #15
+            </a>
+            .
+          </p>
+
+          <textarea
+            value={json()}
+            onInput={(e) => setJson(e.currentTarget.value)}
+            placeholder='{"claudeAiOauth":{"accessToken":"sk-ant-...","refreshToken":"sk-ant-..."}}'
+            rows={5}
+            class={`${FIELD} resize-y font-mono`}
+            spellcheck={false}
+            autocomplete="off"
+          />
+
+          <Show when={uploadErr()}>
+            {(message) => <p class="text-[11px] text-text-on-critical-base">{message()}</p>}
+          </Show>
+
+          <div class="flex items-center gap-2">
+            <button type="submit" disabled={uploading() || !json().trim()} class={`${BTN_GHOST} h-7 px-3`}>
+              {uploading() ? "Uploading…" : present() ? "Overwrite with these" : "Use these credentials"}
+            </button>
             <button
               type="button"
-              onClick={() => setShowUpload((v) => !v)}
-              class="text-[11px] text-emerald-400/70 hover:text-emerald-200"
+              onClick={() => {
+                setShowUpload(false)
+                setJson("")
+                setUploadErr(null)
+              }}
+              disabled={uploading()}
+              class={TEXT_ACTION}
             >
-              {showUpload() ? "Cancel" : "Replace"}
+              Cancel
             </button>
           </div>
-
-          <Show when={showUpload()}>
-            {/* Reuse the paste form when overwriting an existing file. */}
-            <form onSubmit={upload} class="mt-2 space-y-2">
-              <textarea
-                value={json()}
-                onInput={(e) => setJson(e.currentTarget.value)}
-                placeholder='{"access_token":"...","refresh_token":"...","email":"..."}'
-                rows={5}
-                class="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs font-mono text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blue-500 resize-y"
-                spellcheck={false}
-                autocomplete="off"
-              />
-              <Show when={uploadErr()}>
-                <p class="text-[11px] text-red-400">{uploadErr()}</p>
-              </Show>
-              <div class="flex items-center gap-2">
-                <button
-                  type="submit"
-                  disabled={uploading() || !json().trim()}
-                  class="text-xs px-3 py-1.5 rounded-md bg-blue-600/30 border border-blue-500/40 text-blue-100 hover:bg-blue-600/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {uploading() ? "Uploading…" : "Overwrite with these"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setShowUpload(false); setJson(""); setUploadErr(null) }}
-                  disabled={uploading()}
-                  class="text-xs px-3 py-1.5 rounded-md text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </Show>
-        </Show>
+        </form>
       </Show>
     </div>
   )
 }
 
-/** Cheap relative-time formatter — "5m", "2h", "Jun 14". */
+/** Cheap relative-time formatter — "5m ago", "2h ago", "Jun 14". */
 function relativeTimeShort(mtimeMs: number): string {
+  if (!mtimeMs) return "unknown"
   const diff = (Date.now() - mtimeMs) / 1000
   if (diff < 60) return "just now"
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`

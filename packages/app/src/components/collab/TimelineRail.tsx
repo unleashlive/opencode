@@ -25,6 +25,7 @@ import { createMemo, createResource, createSignal, For, onCleanup, Show } from "
 import { useCollab } from "@/context/collab"
 import type { CollabRole, PromptSuggestion } from "@opencode-ai/collab"
 import { renderMentions } from "./mentions"
+import { Chevron } from "./glyphs"
 import { LABEL_MICRO } from "./ui"
 import { bucketMeta, clockTime, groupTimeline, openByDefault, type TimelineEvent } from "./timeline-utils"
 
@@ -430,19 +431,6 @@ function TextAction(props: {
     >
       {props.label}
     </button>
-  )
-}
-
-function Chevron(props: { open: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      aria-hidden="true"
-      class={`size-3 shrink-0 text-icon-base transition-transform duration-150 ease-out motion-reduce:transition-none ${props.open ? "rotate-90" : ""}`}
-    >
-      <path d="M7.5 4.5 13 10l-5.5 5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-    </svg>
   )
 }
 
