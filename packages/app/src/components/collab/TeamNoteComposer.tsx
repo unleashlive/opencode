@@ -139,15 +139,15 @@ export function TeamChatRail(props: {
       .slice(0, 6)
   })
 
-  // Reading the rail is what marks mentions as read.
-  createEffect(() => {
-    if (!collapsed() && collab.unreadMentions() > 0) collab.clearMentions()
-  })
-
+  // Reading the rail is what marks mentions as read. Deliberately driven by
+  // user action rather than by an effect on visibility: both a desktop rail and
+  // a mobile pane are mounted at once, so an effect would clear the badge from
+  // the instance the phone is not even showing.
   function toggleCollapsed() {
     const next = !collapsed()
     setCollapsed(next)
     writeCollapsed(next)
+    if (!next) collab.clearMentions()
   }
 
   function insertSuggestion(p: Participant) {
@@ -248,6 +248,7 @@ export function TeamChatRail(props: {
       <aside
         class={`flex w-full min-h-0 flex-col border-border-weak-base bg-surface-base md:w-[296px] md:shrink-0 md:border-l ${props.class ?? ""}`}
         aria-label="Team chat"
+        onClick={() => collab.clearMentions()}
       >
         <div class="flex h-11 shrink-0 items-center gap-2 border-b border-border-weak-base px-3">
           <Show when={isRail()}>
