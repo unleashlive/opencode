@@ -70,12 +70,6 @@ export const BTN_ICON_CRITICAL =
   " hover:bg-surface-critical-weak hover:text-text-on-critical-base active:bg-surface-base-active" +
   " disabled:text-icon-disabled"
 
-/** The "Collab" badge. The only place the accent is used as a fill. */
-export const PILL_BRAND =
-  "inline-flex items-center gap-1 rounded-md border border-collab-accent-line px-1.5 py-0.5 " +
-  "bg-collab-accent-soft text-collab-accent " +
-  "text-[9.5px] font-[600] uppercase leading-none tracking-[0.08em]"
-
 /** Selected / active row accent (current session in the embed sidebar). */
 export const ROW_ACTIVE = "bg-collab-accent-soft border-l-2 border-l-collab-accent"
 

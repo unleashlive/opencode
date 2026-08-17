@@ -15,7 +15,8 @@
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js"
 import { useCollab } from "@/context/collab"
 import type { CollabRole } from "@opencode-ai/collab"
-import { BTN_GHOST, BTN_ICON, CHIP, PILL_BRAND } from "./ui"
+import { BTN_GHOST, BTN_ICON, CHIP } from "./ui"
+import { BrandMark } from "./BrandMark"
 import { ThemeToggle } from "./ThemeToggle"
 
 /** How many avatars fit before the stack collapses into a +N chip. */
@@ -70,10 +71,16 @@ export function SessionTopBar(props: {
           e.preventDefault()
           window.location.href = "/collab/new"
         }}
-        class={`${PILL_BRAND} shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-collab-accent-line`}
+        class="flex shrink-0 items-center gap-1.5 outline-none focus-visible:ring-2 focus-visible:ring-collab-accent-line"
       >
-        Collab
+        <BrandMark />
+        {/* Hidden below sm: the mark alone identifies the product once the
+            row gets crowded, and the session name stays the prominent thing
+            in the row rather than competing with the full product name. */}
+        <span class="hidden text-14-medium text-text-strong sm:inline">Unleash Collab</span>
       </a>
+
+      <span class="hidden h-4 w-px shrink-0 bg-border-weak-base sm:inline-block" aria-hidden="true" />
 
       <h1 class="min-w-0 shrink truncate text-14-medium text-text-strong">{collab.session()?.name ?? "Loading…"}</h1>
 
@@ -344,7 +351,7 @@ export function formatExportMarkdown(data: {
   const repoList = session.repos.join(", ") || "none"
 
   const lines: string[] = [
-    `# Collab Session: ${session.name}`,
+    `# Unleash Collab Session: ${session.name}`,
     ``,
     `| Field | Value |`,
     `|-------|-------|`,

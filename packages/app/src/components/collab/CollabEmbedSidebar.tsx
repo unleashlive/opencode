@@ -14,7 +14,8 @@ import { createResource, For, Show, createMemo, createSignal } from "solid-js"
 import type { CollabSession } from "@opencode-ai/collab"
 import { collabEmbedSessionId, navigateTopToCollabSession } from "@/utils/collab-embed"
 import { ConfirmDialog } from "./CollabDialog"
-import { BTN_GHOST, BTN_ICON_CRITICAL, CHIP, LABEL_MICRO, PILL_BRAND, ROW_ACTIVE } from "./ui"
+import { BTN_GHOST, BTN_ICON_CRITICAL, CHIP, LABEL_MICRO, ROW_ACTIVE } from "./ui"
+import { BrandMark } from "./BrandMark"
 
 interface Me {
   githubId: number
@@ -73,8 +74,14 @@ export function CollabEmbedSidebar() {
     <div class="flex h-full w-full flex-col border-r border-border-weak-base bg-surface-base">
       <div class="shrink-0 border-b border-border-weak-base px-3 py-2.5">
         <div class="mb-1 flex items-center gap-2">
-          <button type="button" onClick={goToLanding} title="Back to your collab sessions" class={PILL_BRAND}>
-            Collab
+          <button
+            type="button"
+            onClick={goToLanding}
+            title="Back to your collab sessions"
+            class="flex items-center gap-1.5 outline-none focus-visible:ring-2 focus-visible:ring-collab-accent-line"
+          >
+            <BrandMark size={16} />
+            <span class="text-12-medium text-text-strong">Unleash Collab</span>
           </button>
         </div>
         <h2 class="text-12-medium text-text-strong">Sessions</h2>

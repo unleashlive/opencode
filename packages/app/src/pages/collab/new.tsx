@@ -21,6 +21,7 @@ import { createMemo, createResource, createSignal, For, onMount, Show } from "so
 import { useNavigate } from "@solidjs/router"
 import type { CollabSession } from "@opencode-ai/collab"
 import { CollabDialog, ConfirmDialog } from "@/components/collab/CollabDialog"
+import { BrandMark } from "@/components/collab/BrandMark"
 import { Chevron } from "@/components/collab/glyphs"
 import { ThemeToggle } from "@/components/collab/ThemeToggle"
 import { dayKey } from "@/components/collab/timeline-utils"
@@ -36,7 +37,6 @@ import {
   CHIP_SELECT_ON,
   FIELD,
   LABEL_MICRO,
-  PILL_BRAND,
   SEGMENT_ITEM,
   SEGMENT_ITEM_ACTIVE,
   SEGMENT_ITEM_IDLE,
@@ -246,8 +246,10 @@ export default function NewCollabSession() {
       {/* ── Top bar ──────────────────────────────────────────────────────── */}
       <header class="flex h-12 shrink-0 items-center gap-2 border-b border-border-weak-base bg-surface-base px-3">
         {/* Not a link, unlike the session top bar: /collab/new is this page. */}
-        <span class={`${PILL_BRAND} shrink-0`}>Collab</span>
-        <span class="text-14-medium text-text-strong">Unleash</span>
+        <span class="flex shrink-0 items-center gap-1.5">
+          <BrandMark />
+          <span class="text-14-medium text-text-strong">Unleash Collab</span>
+        </span>
 
         <div class="ml-auto flex shrink-0 items-center gap-2">
           <ThemeToggle />

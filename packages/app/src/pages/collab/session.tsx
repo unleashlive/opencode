@@ -131,7 +131,7 @@ function CollabSessionInner(props: { me: Me }) {
             const target = list.find((s) => s.sessionId === nativeId)
             if (target && target.id !== collab.session()?.id) {
               // Full page nav so CollabProvider remounts with the new session
-              // (fresh participants + SSE) — same pattern as the Collab pill.
+              // (fresh participants + SSE) — same pattern as the brand lockup.
               window.location.href = `/collab/${target.id}`
             }
           } catch {
@@ -238,7 +238,7 @@ function CollabSessionInner(props: { me: Me }) {
                       <iframe
                         src={sessionUrl}
                         class="w-full flex-1 border-0 bg-background-base"
-                        title="Collab session"
+                        title="Unleash Collab session"
                         style={`flex: 1; width: 100%; height: 100%; display: block; ${editorObscured() ? "visibility: hidden;" : ""}`}
                       />
                     )
