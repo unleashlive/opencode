@@ -81,6 +81,10 @@ export default function NewCollabSession() {
   const [submitting, setSubmitting] = createSignal(false)
   const [error, setError] = createSignal<string | null>(null)
   const [authed, setAuthed] = createSignal(false)
+  // Set when the sign-in check itself fails (network down, server
+  // unreachable, or a non-401 error response) so the page can offer a retry
+  // instead of showing "Signing in…" forever.
+  const [authError, setAuthError] = createSignal<string | null>(null)
   // 409-conflict dialog state.  Server returns this when the user typed a
   // branch name like `collab/feature-x` and a linked repo already has a
   // `collab` leaf branch (refs/heads layout collision — see
@@ -94,14 +98,30 @@ export default function NewCollabSession() {
   const [pendingDelete, setPendingDelete] = createSignal<CollabSession | null>(null)
   const [deleteError, setDeleteError] = createSignal<string | null>(null)
 
-  // Check auth immediately on mount — redirect to GitHub OAuth if not logged in
-  onMount(async () => {
-    const res = await fetch("/collab/me")
-    if (res.status === 401) {
-      window.location.href = "/collab/auth/github?next=/collab/new"
-      return
+  /** Check auth and either flip authed() or set authError() so the fallback
+   *  UI can offer a retry.  Extracted so both onMount and the "Try again"
+   *  button run the same check. */
+  async function checkAuth() {
+    setAuthError(null)
+    try {
+      const res = await fetch("/collab/me")
+      if (res.status === 401) {
+        window.location.href = "/collab/auth/github?next=/collab/new"
+        return
+      }
+      if (!res.ok) {
+        setAuthError("Sign-in check didn't come back cleanly. The server may be restarting.")
+        return
+      }
+      setAuthed(true)
+    } catch {
+      setAuthError("Couldn't reach the server to check sign-in. Check your connection and try again.")
     }
-    setAuthed(true)
+  }
+
+  // Check auth immediately on mount — redirect to GitHub OAuth if not logged in
+  onMount(() => {
+    void checkAuth()
   })
 
   // Load org repos once authenticated
@@ -295,7 +315,18 @@ export default function NewCollabSession() {
 
           <Show
             when={authed()}
-            fallback={<p class="text-12-regular text-text-base">Signing in…</p>}
+            fallback={
+              <Show when={authError()} fallback={<p class="text-12-regular text-text-base">Signing in…</p>}>
+                {(message) => (
+                  <div class="flex flex-col items-start gap-2">
+                    <p class="text-12-regular text-text-base">{message()}</p>
+                    <button type="button" onClick={() => void checkAuth()} class={`${BTN_GHOST} h-8 px-3`}>
+                      Try again
+                    </button>
+                  </div>
+                )}
+              </Show>
+            }
           >
             <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
               {/* Create form first in the DOM: it is the point of the page, and
