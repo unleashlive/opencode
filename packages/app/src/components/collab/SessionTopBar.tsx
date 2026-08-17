@@ -82,7 +82,7 @@ export function SessionTopBar(props: {
           <span class={`${CHIP} hidden shrink-0 sm:inline-flex`} title={repos().join("\n")}>
             {name()}
             <Show when={repos().length > 1}>
-              <span class="text-text-weaker">+{repos().length - 1}</span>
+              <span class="text-text-weak">+{repos().length - 1}</span>
             </Show>
           </span>
         )}

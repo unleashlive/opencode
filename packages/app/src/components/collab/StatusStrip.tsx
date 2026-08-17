@@ -84,7 +84,7 @@ export function StatusStrip(props: { myRole: CollabRole }) {
             )}
           </For>
           <Show when={openedPrs().length > 2}>
-            <span class="font-mono text-[10.5px] text-text-weaker">+{openedPrs().length - 2}</span>
+            <span class="font-mono text-[10.5px] text-text-weak">+{openedPrs().length - 2}</span>
           </Show>
 
           <Show when={canOpenPr()}>
@@ -110,7 +110,7 @@ export function StatusStrip(props: { myRole: CollabRole }) {
               <span
                 classList={{
                   "font-mono text-[10.5px]": true,
-                  "text-text-weaker": r.status === "skipped",
+                  "text-text-base": r.status === "skipped",
                   "text-text-on-critical-base": r.status === "error",
                 }}
                 title={r.status === "error" ? r.error : r.status === "skipped" ? r.reason : undefined}

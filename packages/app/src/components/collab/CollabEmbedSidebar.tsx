@@ -78,7 +78,7 @@ export function CollabEmbedSidebar() {
           </button>
         </div>
         <h2 class="text-12-medium text-text-strong">Sessions</h2>
-        <p class="text-12-regular text-text-weak">Switch between coding sessions</p>
+        <p class="text-12-regular text-text-base">Switch between coding sessions</p>
       </div>
 
       <div class="shrink-0 border-b border-border-weak-base px-2 py-2">
@@ -91,11 +91,11 @@ export function CollabEmbedSidebar() {
       </div>
 
       <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1">
-        <Show when={!sessions.loading} fallback={<p class="px-3 py-3 text-12-regular text-text-weak">Loading sessions…</p>}>
+        <Show when={!sessions.loading} fallback={<p class="px-3 py-3 text-12-regular text-text-base">Loading sessions…</p>}>
           <Show
             when={sessionList().length > 0}
             fallback={
-              <p class="px-3 py-6 text-center text-12-regular text-text-weak">
+              <p class="px-3 py-6 text-center text-12-regular text-text-base">
                 {sessions.error ? "Could not load your sessions" : "No sessions"}
               </p>
             }
@@ -134,7 +134,7 @@ export function CollabEmbedSidebar() {
                       <div class="mt-1 flex flex-wrap items-center gap-1">
                         <Show
                           when={(session.repos?.length ?? 0) > 0}
-                          fallback={<span class="font-mono text-[10.5px] text-text-weaker">no repos linked</span>}
+                          fallback={<span class="font-mono text-[10.5px] text-text-base">no repos linked</span>}
                         >
                           <For each={session.repos.slice(0, 2)}>
                             {(repo) => (
@@ -144,7 +144,7 @@ export function CollabEmbedSidebar() {
                             )}
                           </For>
                           <Show when={(session.repos?.length ?? 0) > 2}>
-                            <span class="font-mono text-[10.5px] text-text-weaker">+{session.repos.length - 2}</span>
+                            <span class="font-mono text-[10.5px] text-text-weak">+{session.repos.length - 2}</span>
                           </Show>
                         </Show>
                         <span class={CHIP} title="Prompt queue mode">
@@ -154,7 +154,7 @@ export function CollabEmbedSidebar() {
 
                       <Show when={session.branch}>
                         {(branch) => (
-                          <p class="mt-1 truncate font-mono text-[10.5px] text-text-weak" title={branch()}>
+                          <p class="mt-1 truncate font-mono text-[10.5px] text-text-base" title={branch()}>
                             {branch()}
                           </p>
                         )}

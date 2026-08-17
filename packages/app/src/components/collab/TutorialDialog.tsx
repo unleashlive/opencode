@@ -188,7 +188,7 @@ export function TutorialDialog(props: { onClose: () => void }) {
                       </span>
                       <span class="text-12-medium text-text-strong">{f.title}</span>
                     </div>
-                    <p class="text-[11px] leading-relaxed text-text-weak">{f.body}</p>
+                    <p class="text-[11px] leading-relaxed text-text-base">{f.body}</p>
                   </div>
                 )}
               </For>
@@ -197,7 +197,7 @@ export function TutorialDialog(props: { onClose: () => void }) {
 
           <Show when={tab() === "shortcuts"}>
             <div class="flex flex-col gap-5 p-5">
-              <p class="text-[11px] leading-relaxed text-text-weak">
+              <p class="text-[11px] leading-relaxed text-text-base">
                 These apply <strong class="text-text-strong">inside the editor pane</strong>. The leader key is{" "}
                 <Key>Ctrl+X</Key>: press it first, then the next key. Hit <Key>Ctrl+Alt+K</Key> inside the editor to see
                 every shortcut.
@@ -210,13 +210,13 @@ export function TutorialDialog(props: { onClose: () => void }) {
                       <For each={group.rows}>
                         {(row) => (
                           <div class="flex items-center justify-between gap-3 bg-surface-inset-base px-3 py-2">
-                            <span class="text-[11px] text-text-weak">{row.label}</span>
+                            <span class="text-[11px] text-text-base">{row.label}</span>
                             <div class="flex shrink-0 items-center gap-1">
                               <For each={row.keys}>
                                 {(k, i) => (
                                   <>
                                     <Show when={i() > 0}>
-                                      <span class="text-[10px] text-text-weaker">/</span>
+                                      <span class="text-[10px] text-text-weak">/</span>
                                     </Show>
                                     <Key>{k}</Key>
                                   </>
@@ -242,7 +242,7 @@ export function TutorialDialog(props: { onClose: () => void }) {
                 href="https://opencode.ai/docs/keybinds/"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="text-[11px] text-text-weak underline-offset-2 outline-none transition-colors duration-150 ease-out hover:text-text-strong hover:underline focus-visible:ring-2 focus-visible:ring-collab-accent-line motion-reduce:transition-none"
+                class="text-[11px] text-text-base underline-offset-2 outline-none transition-colors duration-150 ease-out hover:text-text-strong hover:underline focus-visible:ring-2 focus-visible:ring-collab-accent-line motion-reduce:transition-none"
               >
                 Full keybinds reference
               </a>

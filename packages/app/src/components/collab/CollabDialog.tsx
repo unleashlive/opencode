@@ -78,7 +78,7 @@ export function ConfirmDialog(props: {
   return (
     <CollabDialog title={props.title} onClose={props.onClose} fit>
       <div class="flex flex-col gap-4 px-5 pb-5">
-        <Show when={props.body}>{(body) => <div class="text-12-regular text-text-weak">{body()}</div>}</Show>
+        <Show when={props.body}>{(body) => <div class="text-12-regular text-text-base">{body()}</div>}</Show>
         <div class="flex justify-end gap-2">
           <Show when={props.onConfirm}>
             <button type="button" onClick={() => props.onClose()} class={`${BTN_GHOST} h-8 px-3`}>

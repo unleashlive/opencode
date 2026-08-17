@@ -78,7 +78,7 @@ export function McpConfigDialog(props: { onClose: () => void }) {
             onInput={(e) => setToken(e.currentTarget.value)}
             onKeyDown={(e) => e.key === "Enter" && save()}
           />
-          <p class="text-[11px] text-text-weak">
+          <p class="text-[11px] text-text-base">
             Starts with <code class="font-mono">ul_pat_</code>. Stage is fixed to <code class="font-mono">cirrus</code>.
           </p>
         </div>

@@ -259,7 +259,7 @@ export default function NewCollabSession() {
                   alt=""
                   class="size-6 rounded-full border border-border-weak-base bg-surface-inset-base"
                 />
-                <span class="hidden font-mono text-[10.5px] text-text-weak sm:inline">{user().githubLogin}</span>
+                <span class="hidden font-mono text-[10.5px] text-text-base sm:inline">{user().githubLogin}</span>
               </span>
             )}
           </Show>
@@ -286,14 +286,14 @@ export default function NewCollabSession() {
         <div class="mx-auto w-full max-w-5xl px-4 py-8 md:px-8 md:py-12">
           <div class="mb-8 max-w-2xl">
             <h1 class="text-20-medium text-text-strong">Code together with a shared agent</h1>
-            <p class="mt-1.5 text-14-regular text-text-weak">
+            <p class="mt-1.5 text-14-regular text-text-base">
               One session, one branch, everyone sees the same work. Drivers steer, contributors suggest, viewers watch.
             </p>
           </div>
 
           <Show
             when={authed()}
-            fallback={<p class="text-12-regular text-text-weak">Signing in…</p>}
+            fallback={<p class="text-12-regular text-text-base">Signing in…</p>}
           >
             <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
               {/* Create form first in the DOM: it is the point of the page, and
@@ -318,7 +318,7 @@ export default function NewCollabSession() {
                   <div class="flex flex-col gap-1.5">
                     <div class="flex items-center gap-2">
                       <span class={LABEL_MICRO}>Repositories</span>
-                      <span class="font-mono text-[10.5px] text-text-weaker">optional</span>
+                      <span class="font-mono text-[10.5px] text-text-base">optional</span>
                       <Show when={selectedRepos().length > 0}>
                         <span class="ml-auto font-mono text-[10.5px] text-text-weak">
                           {selectedRepos().length} selected
@@ -327,16 +327,16 @@ export default function NewCollabSession() {
                     </div>
 
                     <Show when={repos.loading}>
-                      <p class="text-12-regular text-text-weak">Loading org repositories…</p>
+                      <p class="text-12-regular text-text-base">Loading org repositories…</p>
                     </Show>
                     <Show when={repos.error}>
-                      <p class="text-12-regular text-text-weak">
+                      <p class="text-12-regular text-text-base">
                         Could not load the org repositories. You can still create the session and add repos from inside
                         it.
                       </p>
                     </Show>
                     <Show when={!repos.loading && !repos.error && repoList().length === 0}>
-                      <p class="text-12-regular text-text-weak">No repositories found in this org.</p>
+                      <p class="text-12-regular text-text-base">No repositories found in this org.</p>
                     </Show>
 
                     <Show when={repoList().length > 0}>
@@ -368,7 +368,7 @@ export default function NewCollabSession() {
                                 </Show>
                                 <span class="truncate">{repo.name}</span>
                                 <Show when={repo.private}>
-                                  <span class="font-mono text-[10px] text-text-weaker">private</span>
+                                  <span class="font-mono text-[10px] text-text-base">private</span>
                                 </Show>
                               </button>
                             )
@@ -383,7 +383,7 @@ export default function NewCollabSession() {
                       <label class={LABEL_MICRO} for="collab-branch">
                         Git branch
                       </label>
-                      <span class="font-mono text-[10.5px] text-text-weaker">optional</span>
+                      <span class="font-mono text-[10.5px] text-text-base">optional</span>
                     </div>
                     <input
                       id="collab-branch"
@@ -393,7 +393,7 @@ export default function NewCollabSession() {
                       placeholder="collab/drone-api-refactor"
                       class={`${FIELD} font-mono`}
                     />
-                    <p class="text-[11px] text-text-weak">
+                    <p class="text-[11px] text-text-base">
                       Every linked repo is checked out to this branch. Leave it blank and{" "}
                       <code class="font-mono text-[10.5px] text-text-strong">collab/&lt;slug&gt;-&lt;id&gt;</code> is
                       created from the default branch.
@@ -470,7 +470,7 @@ export default function NewCollabSession() {
         {(conflict) => (
           <CollabDialog title="Branch name conflict" onClose={() => setBranchConflict(null)} fit>
             <div class="flex flex-col gap-4 px-5 pb-5">
-              <p class="whitespace-pre-wrap text-12-regular text-text-weak">{conflict().message}</p>
+              <p class="whitespace-pre-wrap text-12-regular text-text-base">{conflict().message}</p>
               <p class="text-12-regular text-text-strong">
                 Use <code class="font-mono text-[10.5px]">{conflict().suggested}</code> instead?
               </p>
@@ -555,7 +555,7 @@ function Segmented(props: {
           )}
         </For>
       </div>
-      <Show when={props.hint}>{(hint) => <p class="text-[11px] text-text-weak">{hint()}</p>}</Show>
+      <Show when={props.hint}>{(hint) => <p class="text-[11px] text-text-base">{hint()}</p>}</Show>
     </div>
   )
 }
@@ -615,18 +615,18 @@ function RejoinCard(props: {
     <section class={`${CARD} flex min-h-0 flex-col overflow-hidden`} aria-label="Rejoin a session">
       <header class="flex shrink-0 items-baseline gap-1.5 border-b border-border-weak-base px-3 py-2.5">
         <h2 class="text-12-medium text-text-strong">Rejoin</h2>
-        <p class="text-12-regular text-text-weak">your recent sessions</p>
-        <span class="ml-auto font-mono text-[10.5px] text-text-weaker">{props.sessions.length}</span>
+        <p class="text-12-regular text-text-base">your recent sessions</p>
+        <span class="ml-auto font-mono text-[10.5px] text-text-weak">{props.sessions.length}</span>
       </header>
 
       <div class="max-h-[26rem] min-h-0 overflow-y-auto overscroll-contain">
-        <Show when={!props.loading} fallback={<p class="px-3 py-4 text-12-regular text-text-weak">Loading sessions…</p>}>
+        <Show when={!props.loading} fallback={<p class="px-3 py-4 text-12-regular text-text-base">Loading sessions…</p>}>
           <Show
             when={groups().length > 0}
             fallback={
               <div class="px-3 py-6 text-center">
-                <p class="text-12-regular text-text-weak">{props.failed ? "Could not load your sessions" : "No sessions yet"}</p>
-                <p class="mt-1 font-mono text-[10.5px] text-text-weaker">
+                <p class="text-12-regular text-text-base">{props.failed ? "Could not load your sessions" : "No sessions yet"}</p>
+                <p class="mt-1 font-mono text-[10.5px] text-text-base">
                   {props.failed ? "reload to try again" : "create your first one on the left"}
                 </p>
               </div>
@@ -643,7 +643,7 @@ function RejoinCard(props: {
                   >
                     <Chevron open={isOpen(group.key)} />
                     <span class={LABEL_MICRO}>{group.label}</span>
-                    <span class="ml-auto font-mono text-[10.5px] text-text-weaker">{group.sessions.length}</span>
+                    <span class="ml-auto font-mono text-[10.5px] text-text-weak">{group.sessions.length}</span>
                   </button>
 
                   <Show when={isOpen(group.key)}>
@@ -713,12 +713,12 @@ function SessionRow(props: {
       <div class="min-w-0 flex-1">
         <div class="flex items-center gap-2">
           <span class="min-w-0 flex-1 truncate text-12-medium text-text-strong">{session().name}</span>
-          <span class="shrink-0 font-mono text-[10.5px] text-text-weaker">{relativeTimeShort(epoch(session().createdAt))}</span>
+          <span class="shrink-0 font-mono text-[10.5px] text-text-base">{relativeTimeShort(epoch(session().createdAt))}</span>
         </div>
         <div class="mt-1 flex flex-wrap items-center gap-1">
           <Show
             when={repos().length > 0}
-            fallback={<span class="font-mono text-[10.5px] text-text-weaker">no repos linked</span>}
+            fallback={<span class="font-mono text-[10.5px] text-text-base">no repos linked</span>}
           >
             <For each={repos().slice(0, 2)}>
               {(repo) => (
@@ -728,7 +728,7 @@ function SessionRow(props: {
               )}
             </For>
             <Show when={repos().length > 2}>
-              <span class="font-mono text-[10.5px] text-text-weaker">+{repos().length - 2}</span>
+              <span class="font-mono text-[10.5px] text-text-weak">+{repos().length - 2}</span>
             </Show>
           </Show>
           <span class={CHIP} title="Prompt queue mode">
@@ -854,8 +854,8 @@ function ClaudeCredentialsLine() {
             "bg-surface-warning-strong": !present(),
           }}
         />
-        <span class="shrink-0 text-12-regular text-text-weak">Server credentials</span>
-        <span class="min-w-0 truncate font-mono text-[10.5px] text-text-weak" title={status()?.email ?? undefined}>
+        <span class="shrink-0 text-12-regular text-text-base">Server credentials</span>
+        <span class="min-w-0 truncate font-mono text-[10.5px] text-text-base" title={status()?.email ?? undefined}>
           {machineStatus()}
         </span>
         <button
@@ -873,7 +873,7 @@ function ClaudeCredentialsLine() {
 
       <Show when={showUpload()}>
         <form onSubmit={upload} class="flex flex-col gap-2">
-          <details class="text-[11px] text-text-weak">
+          <details class="text-[11px] text-text-base">
             <summary class="cursor-pointer outline-none hover:text-text-strong focus-visible:ring-2 focus-visible:ring-collab-accent-line">
               How to get the JSON (Mac)
             </summary>

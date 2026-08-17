@@ -172,13 +172,13 @@ export function PreviewLifecycleRow(props: { ctl: PreviewController }) {
               <QuietRow tone="critical">
                 <span class="shrink-0 text-12-medium text-text-on-critical-base">Preview failed</span>
                 <Show when={s().errorMessage}>
-                  {(message) => <span class="shrink-0 truncate text-12-regular text-text-weak">{message()}</span>}
+                  {(message) => <span class="shrink-0 truncate text-12-regular text-text-base">{message()}</span>}
                 </Show>
                 <LogTail lines={s().recentLog.slice(-2)} />
                 <Actions>
                   <Show
                     when={ctl.isDriver()}
-                    fallback={<span class="font-mono text-[10px] text-text-weaker">ask a driver to retry</span>}
+                    fallback={<span class="font-mono text-[10px] text-text-base">ask a driver to retry</span>}
                   >
                     <TextAction label={ctl.busy() ? "Retrying…" : "Retry"} disabled={ctl.busy()} onClick={ctl.launch} />
                   </Show>
@@ -206,17 +206,17 @@ export function PreviewLifecycleRow(props: { ctl: PreviewController }) {
         <QuietRow tone="neutral">
           <Show
             when={ctl.holder()}
-            fallback={<span class="text-12-regular text-text-weak">No preview is running right now. Try launching again.</span>}
+            fallback={<span class="text-12-regular text-text-base">No preview is running right now. Try launching again.</span>}
           >
             {(h) => (
               <Show
                 when={!h().isSelf}
-                fallback={<span class="text-12-regular text-text-weak">This session already holds the preview.</span>}
+                fallback={<span class="text-12-regular text-text-base">This session already holds the preview.</span>}
               >
-                <span class="shrink-0 text-12-regular text-text-weak">
+                <span class="shrink-0 text-12-regular text-text-base">
                   Held by <span class="text-text-strong">{h().sessionName ?? h().collabSessionId}</span>
                 </span>
-                <span class="shrink-0 font-mono text-[10.5px] text-text-weaker">{h().repoFullName.split("/").pop()}</span>
+                <span class="shrink-0 font-mono text-[10.5px] text-text-base">{h().repoFullName.split("/").pop()}</span>
                 <div class="flex min-w-0 flex-wrap items-center gap-1">
                   <For each={h().participants}>
                     {(p) => (
@@ -232,7 +232,7 @@ export function PreviewLifecycleRow(props: { ctl: PreviewController }) {
                           alt=""
                           class="size-4 rounded-full"
                         />
-                        <span class="font-mono text-[10px] text-text-weak">@{p.githubLogin}</span>
+                        <span class="font-mono text-[10px] text-text-base">@{p.githubLogin}</span>
                       </a>
                     )}
                   </For>
@@ -268,7 +268,7 @@ function QuietRow(props: { tone: "neutral" | "success" | "critical"; children: a
 function LogTail(props: { lines: ReadonlyArray<{ stream: "stdout" | "stderr"; line: string }> }) {
   return (
     <Show when={props.lines.length > 0}>
-      <span class="min-w-0 flex-1 truncate font-mono text-[10px] text-text-weaker" title={props.lines.map((l) => l.line).join("\n")}>
+      <span class="min-w-0 flex-1 truncate font-mono text-[10px] text-text-base" title={props.lines.map((l) => l.line).join("\n")}>
         {props.lines[props.lines.length - 1]!.line.slice(0, 200)}
       </span>
     </Show>
@@ -286,7 +286,7 @@ function TextAction(props: { label: string; disabled?: boolean; onClick: () => v
       type="button"
       onClick={props.onClick}
       disabled={props.disabled}
-      class="inline-flex min-h-6 shrink-0 items-center rounded px-1 text-[11px] font-[500] text-text-weak outline-none transition-colors duration-150 ease-out hover:text-text-strong focus-visible:ring-2 focus-visible:ring-collab-accent-line disabled:cursor-not-allowed disabled:text-text-weaker motion-reduce:transition-none"
+      class="inline-flex min-h-6 shrink-0 items-center rounded px-1 text-[11px] font-[500] text-text-base outline-none transition-colors duration-150 ease-out hover:text-text-strong focus-visible:ring-2 focus-visible:ring-collab-accent-line disabled:cursor-not-allowed disabled:text-text-weaker motion-reduce:transition-none"
     >
       {props.label}
     </button>

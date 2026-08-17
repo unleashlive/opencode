@@ -162,7 +162,7 @@ export function TimelineRail(props: { myLogin: string; class?: string }) {
       <div class="flex h-11 shrink-0 items-center gap-2 border-b border-border-weak-base px-3">
         <span class="text-12-medium text-text-strong">Timeline</span>
         <span class="font-mono text-[10.5px] text-text-weak">{filtered().length}</span>
-        <span class="ml-auto truncate font-mono text-[10.5px] text-text-weaker" title={routingHint()}>
+        <span class="ml-auto truncate font-mono text-[10.5px] text-text-base" title={routingHint()}>
           {routingHint()}
         </span>
       </div>
@@ -178,7 +178,7 @@ export function TimelineRail(props: { myLogin: string; class?: string }) {
                 "inline-flex min-h-6 items-center rounded-full border px-2 text-[11px] font-[500] transition-colors duration-150 ease-out motion-reduce:transition-none outline-none focus-visible:ring-2 focus-visible:ring-collab-accent-line":
                   true,
                 "border-collab-accent-line bg-collab-accent-soft text-collab-accent": filter() === value,
-                "border-transparent text-text-weak hover:bg-surface-base-hover hover:text-text-strong": filter() !== value,
+                "border-transparent text-text-base hover:bg-surface-base-hover hover:text-text-strong": filter() !== value,
               }}
             >
               {label}
@@ -204,7 +204,7 @@ export function TimelineRail(props: { myLogin: string; class?: string }) {
         <Show
           when={days().length > 0}
           fallback={
-            <p class="px-3 py-6 text-center text-12-regular text-text-weaker">
+            <p class="px-3 py-6 text-center text-12-regular text-text-base">
               {history.loading ? "Loading history…" : "Nothing here yet."}
             </p>
           }
@@ -222,7 +222,7 @@ export function TimelineRail(props: { myLogin: string; class?: string }) {
                   >
                     <Chevron open={dayOpen()} />
                     <span class={LABEL_MICRO}>{day.label}</span>
-                    <span class="ml-auto font-mono text-[10.5px] text-text-weaker">{day.count}</span>
+                    <span class="ml-auto font-mono text-[10.5px] text-text-weak">{day.count}</span>
                   </button>
 
                   <Show when={dayOpen()}>
@@ -238,8 +238,8 @@ export function TimelineRail(props: { myLogin: string; class?: string }) {
                               class="flex min-h-7 w-full items-center gap-1.5 py-1 pl-6 pr-3 text-left outline-none transition-colors duration-150 ease-out hover:bg-surface-base-hover focus-visible:ring-2 focus-visible:ring-collab-accent-line motion-reduce:transition-none"
                             >
                               <Chevron open={bucketOpen()} />
-                              <span class="font-mono text-[10.5px] text-text-weak">{bucket.label}</span>
-                              <span class="ml-auto truncate font-mono text-[10.5px] text-text-weaker">{bucketMeta(bucket)}</span>
+                              <span class="font-mono text-[10.5px] text-text-base">{bucket.label}</span>
+                              <span class="ml-auto truncate font-mono text-[10.5px] text-text-base">{bucketMeta(bucket)}</span>
                             </button>
                             <Show when={bucketOpen()}>
                               <For each={bucket.events}>{(event) => <EventRow event={event} />}</For>
@@ -275,7 +275,7 @@ function QueueCard(props: {
     <section class="m-2 rounded-md border border-collab-accent-line bg-collab-accent-soft">
       <div class="flex items-center gap-2 px-2.5 py-1.5">
         <span class={`${LABEL_MICRO} text-collab-accent`}>Queue</span>
-        <span class="ml-auto font-mono text-[10.5px] text-text-weak">
+        <span class="ml-auto font-mono text-[10.5px] text-text-base">
           {props.pending.length} pending · {props.queueMode === "vote" ? "Vote" : "FIFO"}
         </span>
       </div>
@@ -333,11 +333,11 @@ function QueueRow(props: {
 
       <div class="mt-1 flex items-center gap-1.5">
         <img src={avatarUrl(s.authorGithubLogin, 24)} alt="" class="size-4 shrink-0 rounded-full" />
-        <span class="truncate text-[11px] font-[500] text-text-weak">{s.authorGithubLogin}</span>
+        <span class="truncate text-[11px] font-[500] text-text-base">{s.authorGithubLogin}</span>
         <Show when={s.voteScore > 0}>
           <span class="font-mono text-[10.5px] text-collab-accent">▲ {s.voteScore}</span>
         </Show>
-        <span class="ml-auto font-mono text-[10.5px] text-text-weaker">{clockTime(epoch(s.createdAt as unknown as string))}</span>
+        <span class="ml-auto font-mono text-[10.5px] text-text-base">{clockTime(epoch(s.createdAt as unknown as string))}</span>
       </div>
 
       <Show when={props.myRole === "driver"}>
@@ -360,7 +360,7 @@ function QueueRow(props: {
       <Show when={props.myRole !== "driver" && props.myRole !== "viewer"}>
         <Show
           when={props.queueMode === "vote"}
-          fallback={<p class="mt-1.5 font-mono text-[10.5px] text-text-weaker">awaiting driver approval</p>}
+          fallback={<p class="mt-1.5 font-mono text-[10.5px] text-text-base">awaiting driver approval</p>}
         >
           <div class="mt-1.5">
             <TextAction
@@ -427,7 +427,7 @@ function TextAction(props: {
         "inline-flex min-h-6 items-center rounded text-[11px] font-[500] transition-colors duration-150 ease-out motion-reduce:transition-none outline-none focus-visible:ring-2 focus-visible:ring-collab-accent-line disabled:cursor-not-allowed disabled:text-text-weaker":
           true,
         "text-text-on-success-base": props.tone === "success",
-        "text-text-weak hover:text-text-strong": props.tone === "weak",
+        "text-text-base hover:text-text-strong": props.tone === "weak",
         "text-collab-accent": props.tone === "accent",
       }}
     >
@@ -441,7 +441,7 @@ function KindChip(props: { kind: TimelineEvent["kind"] }) {
     <span
       classList={{
         "shrink-0 rounded border px-1 py-px font-mono text-[9.5px] uppercase leading-none tracking-[0.06em]": true,
-        "border-transparent bg-surface-inset-base text-text-weak": props.kind === "prompt",
+        "border-transparent bg-surface-inset-base text-text-base": props.kind === "prompt",
         "border-border-success-base text-text-on-success-base": props.kind === "action",
       }}
     >
@@ -464,11 +464,11 @@ function EventRow(props: { event: TimelineEvent }) {
         <div class="flex items-center gap-1.5">
           <span class="truncate text-[11px] font-[500] text-text-strong">{e().author ?? "session"}</span>
           <KindChip kind={e().kind} />
-          <span class="ml-auto shrink-0 font-mono text-[10.5px] text-text-weaker">{clockTime(e().at)}</span>
+          <span class="ml-auto shrink-0 font-mono text-[10.5px] text-text-base">{clockTime(e().at)}</span>
         </div>
-        <p class="line-clamp-2 text-12-regular text-text-weak break-words">{renderMentions(e().content)}</p>
+        <p class="line-clamp-2 text-12-regular text-text-base break-words">{renderMentions(e().content)}</p>
         <Show when={e().meta}>
-          {(meta) => <p class="truncate font-mono text-[10px] text-text-weaker">{meta()}</p>}
+          {(meta) => <p class="truncate font-mono text-[10px] text-text-base">{meta()}</p>}
         </Show>
       </div>
     </article>

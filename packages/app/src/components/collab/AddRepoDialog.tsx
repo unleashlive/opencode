@@ -88,14 +88,14 @@ export function AddRepoDialog(props: { onClose: () => void }) {
       fit
     >
       <div class="flex min-h-0 flex-col gap-3 px-5 pb-5">
-        <Show when={!loading()} fallback={<p class="py-6 text-center text-12-regular text-text-weak">Loading repositories…</p>}>
+        <Show when={!loading()} fallback={<p class="py-6 text-center text-12-regular text-text-base">Loading repositories…</p>}>
           <Show
             when={!loadError()}
             fallback={<p class="py-4 text-12-regular text-text-on-critical-base">{loadError()}</p>}
           >
             <Show
               when={available().length > 0}
-              fallback={<p class="py-6 text-center text-12-regular text-text-weak">No more repositories to add.</p>}
+              fallback={<p class="py-6 text-center text-12-regular text-text-base">No more repositories to add.</p>}
             >
               <div class="flex max-h-64 min-h-0 flex-wrap content-start items-start gap-1.5 overflow-y-auto overscroll-contain">
                 <For each={available()}>

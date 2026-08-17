@@ -235,9 +235,9 @@ export function TeamChatRail(props: {
           <button type="button" onClick={toggleCollapsed} aria-label="Expand team chat" title="Expand team chat" class={BTN_ICON}>
             <ChevronLeft />
           </button>
-          <span class="font-mono text-[10.5px] text-text-weak [writing-mode:vertical-rl]">team chat</span>
+          <span class="font-mono text-[10.5px] text-text-base [writing-mode:vertical-rl]">team chat</span>
           <Show when={collab.notes().length > 0}>
-            <span class="font-mono text-[10.5px] text-text-weaker [writing-mode:vertical-rl]">{collab.notes().length}</span>
+            <span class="font-mono text-[10.5px] text-text-weak [writing-mode:vertical-rl]">{collab.notes().length}</span>
           </Show>
           <Show when={collab.unreadMentions() > 0}>
             <span class="size-1.5 rounded-full bg-collab-accent" title={`${collab.unreadMentions()} unread mentions`} />
@@ -266,7 +266,7 @@ export function TeamChatRail(props: {
           <span class="ml-auto font-mono text-[10.5px] text-text-weak">
             <Show when={collab.unreadMentions() > 0}>
               <span class="text-collab-accent">{collab.unreadMentions()}</span>
-              <span class="text-text-weaker">/</span>
+              <span class="text-text-weak">/</span>
             </Show>
             {collab.notes().length}
           </span>
@@ -277,7 +277,7 @@ export function TeamChatRail(props: {
         <div class="h-5 shrink-0 px-3">
           <Show when={typingLabel()}>
             {(label) => (
-              <p class="flex items-center gap-1 truncate text-[11px] text-text-weaker" aria-live="polite">
+              <p class="flex items-center gap-1 truncate text-[11px] text-text-base" aria-live="polite">
                 <span class="flex items-center gap-0.5" aria-hidden="true">
                   <For each={[0, 200, 400]}>
                     {(delay) => (
@@ -297,7 +297,7 @@ export function TeamChatRail(props: {
         <Show
           when={!props.readonly}
           fallback={
-            <p class="shrink-0 border-t border-border-weak-base px-3 py-2 font-mono text-[10.5px] text-text-weaker">
+            <p class="shrink-0 border-t border-border-weak-base px-3 py-2 font-mono text-[10.5px] text-text-base">
               viewer · read only
             </p>
           }
@@ -314,12 +314,12 @@ export function TeamChatRail(props: {
               rows={2}
               disabled={sending()}
               aria-label="Team chat message"
-              class="w-full resize-none rounded-md border border-border-weak-base bg-surface-inset-base px-2 py-1.5 text-12-regular text-text-strong outline-none placeholder:text-text-weaker focus-visible:ring-2 focus-visible:ring-collab-accent-line disabled:text-text-weak"
+              class="w-full resize-none rounded-md border border-border-weak-base bg-surface-inset-base px-2 py-1.5 text-12-regular text-text-strong outline-none placeholder:text-text-weak focus-visible:ring-2 focus-visible:ring-collab-accent-line disabled:text-text-weak"
             />
             <div class="flex items-center gap-2 pt-1">
-              <span class="font-mono text-[10px] text-text-weaker">@ mention · cmd+enter send</span>
+              <span class="font-mono text-[10px] text-text-base">@ mention · cmd+enter send</span>
               <Show when={sending()}>
-                <span class="ml-auto font-mono text-[10px] text-text-weak">sending…</span>
+                <span class="ml-auto font-mono text-[10px] text-text-base">sending…</span>
               </Show>
             </div>
 
@@ -403,7 +403,7 @@ function NotesFeed(props: { groups: Array<{ key: string; label: string; notes: C
       <Show
         when={props.groups.length > 0}
         fallback={
-          <p class="rounded-md border border-dashed border-border-weak-base px-3 py-6 text-center text-12-regular text-text-weaker">
+          <p class="rounded-md border border-dashed border-border-weak-base px-3 py-6 text-center text-12-regular text-text-base">
             No team messages yet.
           </p>
         }
@@ -412,7 +412,7 @@ function NotesFeed(props: { groups: Array<{ key: string; label: string; notes: C
           {(group) => (
             <section>
               <div class="sticky top-0 z-10 -mx-3 bg-surface-base px-3 py-1">
-                <span class="font-mono text-[10px] uppercase tracking-[0.06em] text-text-weaker">{group.label}</span>
+                <span class="font-mono text-[10px] uppercase tracking-[0.06em] text-text-base">{group.label}</span>
               </div>
               <For each={group.notes}>
                 {(n) => {
@@ -427,7 +427,7 @@ function NotesFeed(props: { groups: Array<{ key: string; label: string; notes: C
                       <div class="min-w-0 flex-1">
                         <div class="flex items-baseline gap-1.5">
                           <span class="truncate text-12-medium text-text-strong">{n.authorGithubLogin}</span>
-                          <span class="ml-auto shrink-0 font-mono text-[10px] text-text-weaker">{clockTime(at())}</span>
+                          <span class="ml-auto shrink-0 font-mono text-[10px] text-text-base">{clockTime(at())}</span>
                         </div>
                         <p class="text-12-regular text-text-base break-words whitespace-pre-wrap">
                           {renderMentions(n.content)}

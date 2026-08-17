@@ -175,7 +175,7 @@ function CollabSessionInner(props: { me: Me }) {
                   type="button"
                   onClick={() => setSubmitError(null)}
                   aria-label="Dismiss error"
-                  class="shrink-0 rounded px-1 text-[11px] font-[500] text-text-weak outline-none hover:text-text-strong focus-visible:ring-2 focus-visible:ring-collab-accent-line"
+                  class="shrink-0 rounded px-1 text-[11px] font-[500] text-text-base outline-none hover:text-text-strong focus-visible:ring-2 focus-visible:ring-collab-accent-line"
                 >
                   Dismiss
                 </button>
@@ -309,7 +309,7 @@ function MobileTab(props: { label: string; active: boolean; badge?: boolean; onS
         "flex min-h-11 flex-1 items-center justify-center gap-1.5 border-t-2 text-12-medium outline-none transition-colors duration-150 ease-out focus-visible:ring-2 focus-visible:ring-collab-accent-line motion-reduce:transition-none":
           true,
         "border-t-collab-accent text-text-strong": props.active,
-        "border-t-transparent text-text-weak hover:text-text-strong": !props.active,
+        "border-t-transparent text-text-base hover:text-text-strong": !props.active,
       }}
     >
       {props.label}
@@ -373,7 +373,7 @@ function PreparingWorkspacePanel() {
         fallback={
           <>
             <p class="text-14-medium text-text-strong">Still working on it</p>
-            <p class="max-w-sm text-12-regular text-text-weak">
+            <p class="max-w-sm text-12-regular text-text-base">
               Your workspace is taking longer than usual to come up. This happens with very large repos or on a cold
               worker. Refreshing reconnects you; your session and chat history are safe on the server.
             </p>
@@ -385,10 +385,10 @@ function PreparingWorkspacePanel() {
       >
         <Spinner class="size-5 text-icon-base" />
         <p class="text-14-medium text-text-strong">Preparing your collab session</p>
-        <p class="h-4 text-12-regular text-text-weak" aria-live="polite">
+        <p class="h-4 text-12-regular text-text-base" aria-live="polite">
           {PREPARING_TIPS[tipIndex()]}
         </p>
-        <p class="max-w-sm font-mono text-[10.5px] text-text-weaker">
+        <p class="max-w-sm font-mono text-[10.5px] text-text-base">
           usually 30 seconds to a few minutes
         </p>
       </Show>
@@ -430,7 +430,7 @@ function WorkspaceFailedPanel() {
     <div class="flex flex-1 flex-col items-center justify-center gap-3 bg-background-base px-6 text-center">
       <Icon name="warning" class="size-6 text-text-on-critical-base" />
       <p class="text-14-medium text-text-strong">Workspace setup failed</p>
-      <p class="max-w-md text-12-regular text-text-weak">
+      <p class="max-w-md text-12-regular text-text-base">
         The server could not finish preparing this session's workspace. Most often this is a transient git or network
         issue and a retry clears it.
       </p>
@@ -444,7 +444,7 @@ function WorkspaceFailedPanel() {
       <Show
         when={isDriver()}
         fallback={
-          <p class="max-w-sm text-12-regular text-text-weaker">
+          <p class="max-w-sm text-12-regular text-text-base">
             Only a Driver can retry workspace setup. Hang tight while someone with Driver access kicks it off.
           </p>
         }
@@ -457,7 +457,7 @@ function WorkspaceFailedPanel() {
           <p class="text-[11px] text-text-on-critical-base">{retryErr()}</p>
         </Show>
 
-        <p class="max-w-sm text-12-regular text-text-weaker">
+        <p class="max-w-sm text-12-regular text-text-base">
           Retry wipes the server-side workspace and re-runs the shallow clone and branch checkout. Your session,
           prompts and chat history are unaffected.
         </p>
@@ -533,7 +533,7 @@ function RepoPicker(props: { exclude?: string[]; onDone?: () => void }) {
     <Show
       when={available().length > 0}
       fallback={
-        <p class="py-2 text-center text-12-regular text-text-weak">
+        <p class="py-2 text-center text-12-regular text-text-base">
           {repos.loading ? "Loading repositories…" : "No more repositories to add."}
         </p>
       }
@@ -551,7 +551,7 @@ function RepoPicker(props: { exclude?: string[]; onDone?: () => void }) {
               <span class="min-w-0 flex-1">
                 <span class="block truncate text-12-medium text-text-strong">{repo.full_name}</span>
                 <Show when={repo.description}>
-                  <span class="line-clamp-1 text-12-regular text-text-weak">{repo.description}</span>
+                  <span class="line-clamp-1 text-12-regular text-text-base">{repo.description}</span>
                 </Show>
               </span>
             </label>
@@ -592,7 +592,7 @@ function EmptyReposPanel() {
       <div class="w-full max-w-2xl rounded-lg border border-dashed border-border-weak-base p-6">
         <div class="mb-5 text-center">
           <h2 class="text-14-medium text-text-strong">No repositories linked</h2>
-          <p class="mt-1 text-12-regular text-text-weak">
+          <p class="mt-1 text-12-regular text-text-base">
             <Show
               when={isDriver()}
               fallback="A Driver of this session needs to add a repository before the workspace can open."
@@ -631,7 +631,7 @@ export default function CollabSessionPage() {
       when={me()}
       fallback={
         <div class="flex h-dvh items-center justify-center bg-background-base">
-          <div class="flex items-center gap-2 text-12-regular text-text-weak">
+          <div class="flex items-center gap-2 text-12-regular text-text-base">
             <Spinner class="size-4" />
             Loading…
           </div>
