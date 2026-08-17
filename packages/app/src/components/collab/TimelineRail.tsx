@@ -382,9 +382,11 @@ function QueueRow(props: {
                 <button
                   type="button"
                   onClick={() => void props.onReact(s.id, emoji).catch((e) => setError(String(e)))}
+                  aria-label={`React with ${emoji}`}
+                  aria-pressed={mine()}
                   title={reactors().length > 0 ? reactors().join(", ") : `React with ${emoji}`}
                   classList={{
-                    "inline-flex min-h-5 items-center gap-0.5 rounded-full border px-1.5 text-[10px] leading-none transition-colors duration-150 ease-out motion-reduce:transition-none outline-none focus-visible:ring-2 focus-visible:ring-collab-accent-line":
+                    "inline-flex min-h-6 items-center gap-0.5 rounded-full border px-1.5 text-[10px] leading-none transition-colors duration-150 ease-out motion-reduce:transition-none outline-none focus-visible:ring-2 focus-visible:ring-collab-accent-line":
                       true,
                     "border-collab-accent-line bg-collab-accent-soft text-collab-accent": mine(),
                     "border-border-weak-base text-text-weak hover:bg-surface-base-hover": !mine(),

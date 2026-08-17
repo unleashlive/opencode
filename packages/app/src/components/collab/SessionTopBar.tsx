@@ -119,7 +119,7 @@ export function SessionTopBar(props: {
             )}
           </For>
           <Show when={overflowCount() > 0}>
-            <span class="-ml-[5px] inline-flex size-6 items-center justify-center rounded-full border-2 border-background-base bg-surface-inset-base font-mono text-[9px] text-text-weak">
+            <span class="-ml-[5px] inline-flex size-6 items-center justify-center rounded-full border-2 border-background-base bg-surface-inset-base font-mono text-[10px] text-text-weak">
               +{overflowCount()}
             </span>
           </Show>
