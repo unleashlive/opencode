@@ -1,7 +1,7 @@
-# Collab UI Uplift (ENG-1)
+# Collab UI Uplift (SKU-1)
 
 Execution plan for the approved redesign of the Collab surfaces. Design review and
-prototype signed off 17 Aug 2026. Linear: ENG-1 in project "Unleash Live Collab".
+prototype signed off 17 Aug 2026. Linear: SKU-1 in project "Unleash Live Collab" (team Skunkworks).
 Work branch: `hojae-collab-ui-uplift`. Approved prototype:
 https://claude.ai/code/artifact/456c4fe3-c4e4-4fa5-8b19-a8d7746addc4
 
@@ -63,7 +63,7 @@ Mobile: three tabs (Timeline / Editor / Chat).
 
 Each step is one agent run, sequential (same branch, same working tree), verified in
 the local dev env before the next starts. Commits are small and scoped; every commit
-message body references ENG-1.
+message body references SKU-1.
 
 - **S1 cleanup** (no design changes): delete the four never-imported components
   (ParticipantList, PromptQueuePanel, CollabPromptInput, CollabBadge); fix invented
