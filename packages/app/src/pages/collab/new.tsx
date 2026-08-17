@@ -340,7 +340,11 @@ export default function NewCollabSession() {
                     </Show>
 
                     <Show when={repoList().length > 0}>
-                      <div class="flex max-h-44 flex-wrap gap-1.5 overflow-y-auto overscroll-contain" role="group" aria-label="Repositories">
+                      <div
+                        class="flex max-h-44 flex-wrap content-start items-start gap-1.5 overflow-y-auto overscroll-contain"
+                        role="group"
+                        aria-label="Repositories"
+                      >
                         <For each={repoList()}>
                           {(repo) => {
                             const on = () => selectedRepos().includes(repo.full_name)

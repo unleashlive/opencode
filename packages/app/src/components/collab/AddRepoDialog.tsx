@@ -12,7 +12,8 @@ interface OrgRepo {
 
 /**
  * Mid-session "Add repositories" dialog (Drivers only).  Lists the org's repos
- * with checkboxes, excludes the ones already linked, and appends the picks via
+ * as chip toggles (same picker idiom as the landing page), excludes the ones
+ * already linked to this session, and appends the picks via
  * `collab.addRepos` — which clones them onto the session branch, announces them
  * to the LLM, and folds them into the next "Open PR".
  *
@@ -96,7 +97,7 @@ export function AddRepoDialog(props: { onClose: () => void }) {
               when={available().length > 0}
               fallback={<p class="py-6 text-center text-12-regular text-text-weak">No more repositories to add.</p>}
             >
-              <div class="flex max-h-64 min-h-0 flex-wrap gap-1.5 overflow-y-auto overscroll-contain">
+              <div class="flex max-h-64 min-h-0 flex-wrap content-start items-start gap-1.5 overflow-y-auto overscroll-contain">
                 <For each={available()}>
                   {(repo) => {
                     const on = () => selected().includes(repo.full_name)

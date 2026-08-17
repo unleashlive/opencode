@@ -115,6 +115,28 @@ in the UI; each needs server work in a later pass.
   has `created_at` only, so a prompt is placed on the timeline at authoring
   time, not at approval or dispatch time.
 
+## S4 decisions (made, not deferred)
+
+- **Dialogs use the host shell, not a replacement.** `components/collab/CollabDialog.tsx`
+  composes the Kobalte root, its portal and overlay, and `<Dialog>` from
+  packages/ui, which is exactly the markup `DialogProvider` renders. The
+  imperative `useDialog().show()` API was not used because the collab pages own
+  the open state themselves and the session page reads those same signals to
+  hide the editor iframe while a dialog is up. All five hand-rolled modals and
+  both `confirm()` / `alert()` pairs are on it, and no inline z-index remains.
+- **dialog.css overlay: reverted to upstream.** The fully opaque backdrop was a
+  project-wide change made to match the collab modals' own backdrops. Those
+  modals are gone and the collab dialogs read fine on the translucent overlay,
+  so the shared file goes back to `hsl(from var(--background-base) h s l / 0.2)`.
+- **session.tsx resize range: kept.** The page also renders inside the collab
+  iframe, where `window.innerWidth` is the iframe's. The stage is roughly the
+  viewport minus the two rails, so upstream's max of 45vw lands below its own
+  450px min and the handle has no usable range. The reason is now in the code.
+- **Stock-palette re-injection: removed.** Only the collab accent bridge remains
+  in `packages/app/src/index.css`. A source grep over packages/app and
+  packages/ui finds no numeric colour class left, and a Tailwind build confirms
+  the collab utilities still emit while no palette utility does.
+
 ## Verification
 
 Local dev (see .env.example; unauthenticated local mode + seeded dev cookie):
