@@ -234,8 +234,12 @@ function OverflowMenu(props: {
       const a = document.createElement("a")
       a.href = url
       a.download = `collab-${session.name?.replace(/[^a-z0-9]/gi, "-").toLowerCase() ?? session.id}.md`
+      document.body.appendChild(a)
       a.click()
-      URL.revokeObjectURL(url)
+      a.remove()
+      // Revoke on a later task: revoking in the same task as the click can
+      // cancel the download in some browsers before it has actually started.
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
       props.setOpen(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
