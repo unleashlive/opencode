@@ -28,7 +28,7 @@ import { InviteDialog } from "@/components/collab/InviteDialog"
 import { AddRepoDialog } from "@/components/collab/AddRepoDialog"
 import { TutorialDialog } from "@/components/collab/TutorialDialog"
 import { McpConfigDialog } from "@/components/collab/McpConfigDialog"
-import { TeamNoteComposer } from "@/components/collab/TeamNoteComposer"
+import { TeamChatRail } from "@/components/collab/TeamNoteComposer"
 import { PreviewLauncher } from "@/components/collab/PreviewLauncher"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import type { CollabRole, Participant, PromptSuggestion, RepoPrResult } from "@opencode-ai/collab"
@@ -929,7 +929,7 @@ function CollabSessionInner(props: { me: Me }) {
         {/* Team Notes — side-channel chat for the participants, never reaches
             the LLM.  Owns its own `@` autocomplete so people can ping each
             other without fighting opencode's file-mention popover. */}
-        <TeamNoteComposer readonly={myRole() === "viewer"} />
+        <TeamChatRail readonly={myRole() === "viewer"} variant="pane" />
 
         {/* Queue — takes the remaining vertical space in the sidebar and
             scrolls internally when many prompt suggestions flow in.  The
