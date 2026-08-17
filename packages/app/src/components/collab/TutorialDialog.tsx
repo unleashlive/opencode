@@ -12,6 +12,20 @@ import { LABEL_MICRO, SEGMENT_ITEM, SEGMENT_ITEM_ACTIVE, SEGMENT_ITEM_IDLE, SEGM
 
 type Tab = "features" | "shortcuts"
 
+const TABS: ReadonlyArray<{ value: Tab; label: string }> = [
+  { value: "features", label: "Features" },
+  { value: "shortcuts", label: "Keyboard shortcuts" },
+]
+
+/** Stable ids so each tab button can point `aria-controls` at its panel and
+ *  each panel can point `aria-labelledby` back at its tab. */
+function tutorialTabId(value: Tab): string {
+  return `collab-tutorial-tab-${value}`
+}
+function tutorialPanelId(value: Tab): string {
+  return `collab-tutorial-panel-${value}`
+}
+
 interface Feature {
   emoji: string
   title: string
@@ -136,6 +150,32 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
 
 export function TutorialDialog(props: { onClose: () => void }) {
   const [tab, setTab] = createSignal<Tab>("features")
+  const tabRefs: Partial<Record<Tab, HTMLButtonElement>> = {}
+
+  /** Select a tab and move focus to its button — used by arrow-key nav so
+   *  focus and selection travel together, matching the standard tabs pattern. */
+  function activate(value: Tab) {
+    setTab(value)
+    tabRefs[value]?.focus()
+  }
+
+  function onTablistKeyDown(e: KeyboardEvent) {
+    const idx = TABS.findIndex((t) => t.value === tab())
+    if (idx === -1) return
+    if (e.key === "ArrowRight") {
+      e.preventDefault()
+      activate(TABS[(idx + 1) % TABS.length].value)
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault()
+      activate(TABS[(idx - 1 + TABS.length) % TABS.length].value)
+    } else if (e.key === "Home") {
+      e.preventDefault()
+      activate(TABS[0].value)
+    } else if (e.key === "End") {
+      e.preventDefault()
+      activate(TABS[TABS.length - 1].value)
+    }
+  }
 
   return (
     <CollabDialog
@@ -146,29 +186,31 @@ export function TutorialDialog(props: { onClose: () => void }) {
     >
       <div class="flex min-h-0 flex-1 flex-col">
         {/* Tab strip */}
-        <div class="shrink-0 px-5 pb-3" role="tablist" aria-label="Quick start sections">
+        <div
+          class="shrink-0 px-5 pb-3"
+          role="tablist"
+          aria-label="Quick start sections"
+          onKeyDown={onTablistKeyDown}
+        >
           <div class={SEGMENT_TRACK}>
-            <For
-              each={
-                [
-                  ["features", "Features"],
-                  ["shortcuts", "Keyboard shortcuts"],
-                ] as const
-              }
-            >
-              {([value, label]) => (
+            <For each={TABS}>
+              {(t) => (
                 <button
+                  ref={(el) => (tabRefs[t.value] = el)}
                   type="button"
                   role="tab"
-                  aria-selected={tab() === value}
-                  onClick={() => setTab(value)}
+                  id={tutorialTabId(t.value)}
+                  aria-controls={tutorialPanelId(t.value)}
+                  aria-selected={tab() === t.value}
+                  tabIndex={tab() === t.value ? 0 : -1}
+                  onClick={() => setTab(t.value)}
                   classList={{
                     [SEGMENT_ITEM]: true,
-                    [SEGMENT_ITEM_ACTIVE]: tab() === value,
-                    [SEGMENT_ITEM_IDLE]: tab() !== value,
+                    [SEGMENT_ITEM_ACTIVE]: tab() === t.value,
+                    [SEGMENT_ITEM_IDLE]: tab() !== t.value,
                   }}
                 >
-                  {label}
+                  {t.label}
                 </button>
               )}
             </For>
@@ -178,7 +220,12 @@ export function TutorialDialog(props: { onClose: () => void }) {
         {/* Body */}
         <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-border-weak-base">
           <Show when={tab() === "features"}>
-            <div class="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2">
+            <div
+              role="tabpanel"
+              id={tutorialPanelId("features")}
+              aria-labelledby={tutorialTabId("features")}
+              class="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2"
+            >
               <For each={FEATURES}>
                 {(f) => (
                   <div class="rounded-md border border-border-weak-base bg-surface-inset-base p-3">
@@ -196,7 +243,12 @@ export function TutorialDialog(props: { onClose: () => void }) {
           </Show>
 
           <Show when={tab() === "shortcuts"}>
-            <div class="flex flex-col gap-5 p-5">
+            <div
+              role="tabpanel"
+              id={tutorialPanelId("shortcuts")}
+              aria-labelledby={tutorialTabId("shortcuts")}
+              class="flex flex-col gap-5 p-5"
+            >
               <p class="text-[11px] leading-relaxed text-text-base">
                 These apply <strong class="text-text-strong">inside the editor pane</strong>. The leader key is{" "}
                 <Key>Ctrl+X</Key>: press it first, then the next key. Hit <Key>Ctrl+Alt+K</Key> inside the editor to see
