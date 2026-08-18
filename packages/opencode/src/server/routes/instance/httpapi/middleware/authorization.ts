@@ -10,6 +10,10 @@ import {
   INTERNAL_TOKEN_HEADER,
   internalTokenAuthorizes,
 } from "@/collab/internal-token"
+export {
+  Authorization as ServerAuthorization,
+  authorizationLayer as serverAuthorizationLayer,
+} from "@opencode-ai/server/middleware/authorization"
 
 const AUTH_TOKEN_QUERY = "auth_token"
 const UNAUTHORIZED = 401
@@ -20,6 +24,13 @@ const WWW_AUTHENTICATE = 'Basic realm="Secure Area"'
 // and remap an authorized NotFound into Unauthorized.
 export class Authorization extends HttpApiMiddleware.Service<Authorization>()(
   "@opencode/ExperimentalHttpApiAuthorization",
+  {
+    error: HttpApiError.UnauthorizedNoContent,
+  },
+) {}
+
+export class PtyConnectAuthorization extends HttpApiMiddleware.Service<PtyConnectAuthorization>()(
+  "@opencode/ExperimentalHttpApiPtyConnectAuthorization",
   {
     error: HttpApiError.UnauthorizedNoContent,
   },
@@ -130,21 +141,19 @@ function cookieDecisionFromHttpRequest(
 }
 
 function decodeCredential(input: string) {
-  return Encoding.decodeBase64String(input)
-    .asEffect()
-    .pipe(
-      Effect.match({
-        onFailure: emptyCredential,
-        onSuccess: (header) => {
-          const parts = header.split(":")
-          if (parts.length !== 2) return emptyCredential()
-          return {
-            username: parts[0],
-            password: Redacted.make(parts[1]),
-          }
-        },
-      }),
-    )
+  return Effect.fromResult(Encoding.decodeBase64String(input)).pipe(
+    Effect.match({
+      onFailure: emptyCredential,
+      onSuccess: (header) => {
+        const separator = header.indexOf(":")
+        if (separator === -1) return emptyCredential()
+        return {
+          username: header.slice(0, separator),
+          password: Redacted.make(header.slice(separator + 1)),
+        }
+      },
+    }),
+  )
 }
 
 function credentialFromRequest(request: HttpServerRequest.HttpServerRequest) {
@@ -187,19 +196,12 @@ export const authorizationRouterMiddleware = HttpRouter.middleware()(
         if (isPublicUIPath(request.method, url.pathname)) return yield* effect
         if (hasPtyConnectTicketURL(url)) return yield* effect
 
-        // ADR-0001 Phase 3: per-collab-session internal token for the
-        // executor's self-fetches.  Same short-circuit as in
-        // validateCredential — see comment there.
         if (internalTokenFromHttpRequest(request)) return yield* effect
 
         const cookieDecision = cookieDecisionFromHttpRequest(request, url)
         if (cookieDecision === "allow") return yield* effect
         const mode = authMode()
         if (cookieDecision === "deny") {
-          // Cookie present but not scoped to this resource.  No basic-auth
-          // fallthrough (would leak the password's existence).  In collab
-          // mode we drop the WWW-Authenticate header so the browser doesn't
-          // pop its native dialog.
           return yield* Effect.succeed(
             HttpServerResponse.empty({
               status: UNAUTHORIZED,
@@ -207,9 +209,6 @@ export const authorizationRouterMiddleware = HttpRouter.middleware()(
             }),
           )
         }
-        // fallthrough.  Collab mode: no basic-auth fallback.  Redirect HTML
-        // navigations to OAuth, JSON 401 for everything else (still no
-        // www-authenticate, so no native dialog).
         if (mode === "collab") {
           if (isHtmlNavigation(request)) {
             const next = url.pathname + url.search
@@ -249,6 +248,24 @@ export const authorizationLayer = Layer.effect(
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest
         return yield* credentialFromRequest(request).pipe(
+          Effect.flatMap((credential) => validateCredential(effect, credential, config)),
+        )
+      }),
+    )
+  }),
+)
+
+export const ptyConnectAuthorizationLayer = Layer.effect(
+  PtyConnectAuthorization,
+  Effect.gen(function* () {
+    const config = yield* ServerAuth.Config
+    if (!ServerAuth.required(config)) return PtyConnectAuthorization.of((effect) => effect)
+    return PtyConnectAuthorization.of((effect) =>
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest
+        const url = new URL(request.url, "http://localhost")
+        if (hasPtyConnectTicketURL(url)) return yield* effect
+        return yield* credentialFromURL(url, request).pipe(
           Effect.flatMap((credential) => validateCredential(effect, credential, config)),
         )
       }),
