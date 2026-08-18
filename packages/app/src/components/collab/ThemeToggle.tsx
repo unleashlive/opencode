@@ -10,8 +10,7 @@
  * "system": it reads the effective mode and picks the opposite, so one click
  * always does the visible thing.
  *
- * Not mounted anywhere yet; S3 and S4 place it in the session and landing
- * top bars.
+ * Mounted in SessionTopBar and the landing page top bar.
  *
  * The host icon registry (packages/ui/src/components/icon.tsx) has no moon or
  * sun glyph, so the half-moon below is inline, drawn on the same 20x20 grid

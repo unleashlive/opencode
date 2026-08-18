@@ -76,7 +76,7 @@ export function McpConfigDialog(props: { onClose: () => void }) {
             class={`${FIELD} font-mono`}
             value={token()}
             onInput={(e) => setToken(e.currentTarget.value)}
-            onKeyDown={(e) => e.key === "Enter" && save()}
+            onKeyDown={(e) => e.key === "Enter" && void save()}
           />
           <p class="text-[11px] text-text-base">
             Starts with <code class="font-mono">ul_pat_</code>. Stage is fixed to <code class="font-mono">cirrus</code>.
@@ -98,7 +98,7 @@ export function McpConfigDialog(props: { onClose: () => void }) {
             <button
               type="button"
               disabled={busy()}
-              onClick={remove}
+              onClick={() => void remove()}
               class={`${TEXT_ACTION} text-text-on-critical-base hover:text-text-on-critical-strong`}
             >
               Remove token
@@ -108,7 +108,7 @@ export function McpConfigDialog(props: { onClose: () => void }) {
             <button type="button" onClick={props.onClose} class={`${BTN_GHOST} h-8 px-3`}>
               Cancel
             </button>
-            <button type="button" disabled={busy() || !token().trim()} onClick={save} class={`${BTN_PRIMARY} h-8 px-3`}>
+            <button type="button" disabled={busy() || !token().trim()} onClick={() => void save()} class={`${BTN_PRIMARY} h-8 px-3`}>
               {busy() ? "Saving…" : "Save"}
             </button>
           </div>

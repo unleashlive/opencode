@@ -48,7 +48,7 @@ export function CollabDialog(
       }}
     >
       <Kobalte.Portal>
-        <Kobalte.Overlay data-component="dialog-overlay" onClick={() => props.onClose()} />
+        <Kobalte.Overlay data-component="dialog-overlay" />
         <Dialog title={props.title} description={props.description} size={props.size} fit={props.fit}>
           {props.children}
         </Dialog>
@@ -70,6 +70,8 @@ export function ConfirmDialog(props: {
   body?: JSXElement
   confirmLabel?: string
   cancelLabel?: string
+  /** Label for the single dismiss button when `onConfirm` is omitted. */
+  dismissLabel?: string
   /** Confirm button reads as a destructive action. */
   destructive?: boolean
   onConfirm?: () => void
@@ -89,7 +91,7 @@ export function ConfirmDialog(props: {
             when={props.onConfirm}
             fallback={
               <button type="button" autofocus onClick={() => props.onClose()} class={`${BTN_PRIMARY} h-8 px-3`}>
-                {props.cancelLabel ?? "Close"}
+                {props.dismissLabel ?? "Close"}
               </button>
             }
           >

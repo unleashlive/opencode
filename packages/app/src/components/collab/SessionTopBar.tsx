@@ -260,7 +260,7 @@ function OverflowMenu(props: {
         type="button"
         onClick={() => props.setOpen(!props.open())}
         aria-label="More session actions"
-        aria-haspopup="menu"
+        aria-haspopup="true"
         aria-expanded={props.open()}
         class={BTN_ICON}
       >
@@ -272,7 +272,7 @@ function OverflowMenu(props: {
       <Show when={props.open()}>
         <div
           ref={(el) => (panelRef = el)}
-          role="menu"
+          role="list"
           aria-label="Session actions"
           class="absolute right-0 top-full z-50 mt-1 w-56 overflow-hidden rounded-md border border-border-weak-base bg-surface-raised-base py-1"
         >
@@ -318,7 +318,7 @@ function MenuItem(props: { label: string; hint?: string; disabled?: boolean; onS
   return (
     <button
       type="button"
-      role="menuitem"
+      role="listitem"
       disabled={props.disabled}
       onClick={props.onSelect}
       title={props.hint}

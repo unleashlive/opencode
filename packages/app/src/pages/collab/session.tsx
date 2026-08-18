@@ -264,7 +264,7 @@ function CollabSessionInner(props: { me: Me }) {
       </div>
 
       {/* Mobile-only surface switcher. Hidden at md+, where all three show. */}
-      <nav class="flex shrink-0 border-t border-border-weak-base bg-surface-base md:hidden" aria-label="Session surfaces">
+      <div role="tablist" aria-label="Session surfaces" class="flex shrink-0 border-t border-border-weak-base bg-surface-base md:hidden">
         <MobileTab label="Timeline" active={mobileView() === "timeline"} onSelect={() => setMobileView("timeline")} />
         <MobileTab label="Editor" active={mobileView() === "editor"} onSelect={() => setMobileView("editor")} />
         <MobileTab
@@ -276,7 +276,7 @@ function CollabSessionInner(props: { me: Me }) {
             collab.clearMentions()
           }}
         />
-      </nav>
+      </div>
 
       <Show when={showTutorial()}>
         <TutorialDialog onClose={() => setShowTutorial(false)} />
@@ -304,7 +304,8 @@ function MobileTab(props: { label: string; active: boolean; badge?: boolean; onS
     <button
       type="button"
       onClick={props.onSelect}
-      aria-current={props.active ? "page" : undefined}
+      role="tab"
+      aria-selected={props.active}
       classList={{
         "flex min-h-11 flex-1 items-center justify-center gap-1.5 border-t-2 text-12-medium outline-none transition-colors duration-150 ease-out focus-visible:ring-2 focus-visible:ring-collab-accent-line motion-reduce:transition-none":
           true,
