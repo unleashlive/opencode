@@ -15,7 +15,6 @@ import { ConfigMarkdown } from "@/config/markdown"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Glob } from "@opencode-ai/core/util/glob"
 import { Discovery } from "./discovery"
-import CUSTOMIZE_OPENCODE_SKILL_BODY from "../../../core/src/plugin/skill/customize-opencode.md" with { type: "text" }
 import GRAPHIFY_SKILL_BODY from "../../../core/src/plugin/skill/graphify.md" with { type: "text" }
 import { isRecord } from "@/util/record"
 import { escapeHtml } from "@/util/html"

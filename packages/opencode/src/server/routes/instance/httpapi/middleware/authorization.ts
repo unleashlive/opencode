@@ -134,7 +134,7 @@ function cookieDecisionFromHttpRequest(
   const headers = new Headers()
   for (const [k, v] of Object.entries(request.headers)) {
     if (typeof v === "string") headers.set(k, v)
-    else if (Array.isArray(v)) headers.set(k, v.join(","))
+    else if (Array.isArray(v)) headers.set(k, (v as string[]).join(","))
   }
   const synthetic = new Request(url.toString(), { method: request.method, headers })
   return cookieAuthorizesRequest(synthetic)

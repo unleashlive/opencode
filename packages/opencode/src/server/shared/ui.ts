@@ -89,7 +89,7 @@ function serveLocalUIEffect(requestPath: string, localUIPath: string) {
     const filePath = fs.existsSync(candidate) && fs.statSync(candidate).isFile() ? candidate : path.join(localUIPath, "index.html")
 
     const body = fs.readFileSync(filePath)
-    const mime = AppFileSystem.mimeType(filePath)
+    const mime = FSUtil.mimeType(filePath)
     const headers = new Headers({
       "content-type": mime,
       "cache-control": filePath.endsWith("index.html") ? "max-age=0,no-cache,no-store,must-revalidate" : "public,max-age=31536000,immutable",

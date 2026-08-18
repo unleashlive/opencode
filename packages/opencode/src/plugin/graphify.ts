@@ -1,9 +1,11 @@
 import type { Hooks, Plugin, PluginInput } from "@opencode-ai/plugin"
-import * as Log from "@opencode-ai/core/util/log"
 import path from "node:path"
 import { existsSync } from "node:fs"
 
-const log = Log.create({ service: "plugin.graphify" })
+const log = {
+  info: (msg: string, meta?: unknown) => console.info("[graphify]", msg, meta ?? ""),
+  warn: (msg: string, meta?: unknown) => console.warn("[graphify]", msg, meta ?? ""),
+}
 
 // Graphify (https://github.com/safishamsi/graphify) turns a repo into a queryable
 // knowledge graph. This built-in plugin makes the fork "Graphify-aware" for every

@@ -6,6 +6,10 @@ import { cookieAuthorizesRequest, lookupCookieIdentity } from "@/collab/cookie-a
 import { markPreviewTraffic, getActivePreviewPort } from "@/collab/preview-launcher"
 import { previewHost } from "@/collab/preview-host"
 import { Database } from "@/storage/db"
+
+const log = {
+  error: (msg: string, meta?: unknown) => console.error("[opencode]", msg, meta ?? ""),
+}
 import { NodeHttpServer } from "@effect/platform-node"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { ConfigProvider, Context, Effect, Exit, Layer, Scope, Stream } from "effect"
@@ -64,7 +68,7 @@ function previewServerResponse(webResponse: Response) {
   const previewHeaders = new Headers(webResponse.headers)
   if (webResponse.body) {
     const previewStream = Stream.fromAsyncIterable(
-      webResponse.body as AsyncIterable<Uint8Array>,
+      webResponse.body as unknown as AsyncIterable<Uint8Array>,
       () => new Error("Preview stream error"),
     )
     return HttpServerResponse.stream(previewStream, {
