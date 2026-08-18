@@ -28,7 +28,7 @@ export function createInvite(
         collab_session_id: collabSessionId,
         role,
         created_by: createdBy,
-        expires_at: expiresAt,
+        expires_at: new Date(expiresAt),
         used_at: null,
         used_by: null,
       })
@@ -43,13 +43,13 @@ export function validateInvite(token: string): InviteToken | null {
     const row = db.select().from(CollabInviteTable).where(eq(CollabInviteTable.token, token)).get()
     if (!row) return null
     if (row.used_at) return null
-    if (row.expires_at && row.expires_at < Date.now()) return null
+    if (row.expires_at && row.expires_at.getTime() < Date.now()) return null
     return {
       token: row.token,
       collabSessionId: row.collab_session_id,
       role: row.role,
       createdBy: row.created_by,
-      expiresAt: row.expires_at ? new Date(row.expires_at) : null,
+      expiresAt: row.expires_at ?? null,
       usedAt: null,
     }
   })
@@ -58,7 +58,7 @@ export function validateInvite(token: string): InviteToken | null {
 export function redeemInvite(token: string, usedBy: string): void {
   Database.use((db) => {
     db.update(CollabInviteTable)
-      .set({ used_at: Date.now(), used_by: usedBy })
+      .set({ used_at: new Date(), used_by: usedBy })
       .where(eq(CollabInviteTable.token, token))
       .run()
   })

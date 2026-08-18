@@ -58,7 +58,7 @@ export function toggleReaction(
           suggestion_id: suggestionId,
           voter_github_login: voterLogin,
           emoji,
-          created_at: Date.now(),
+          created_at: new Date(),
         })
         .run()
       added = true
