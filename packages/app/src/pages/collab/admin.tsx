@@ -1,4 +1,5 @@
 import { createResource, For, Show } from "solid-js"
+import "./admin.css"
 
 // ── Types matching GET /collab/admin/stats response ────────────────────────
 

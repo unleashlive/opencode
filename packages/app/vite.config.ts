@@ -25,6 +25,21 @@ export default defineConfig({
     host: "0.0.0.0",
     allowedHosts: true,
     port: 3000,
+    proxy: {
+      // Local dev: the app fetches /collab/* root-relative; in production the
+      // opencode server serves both. Forward API calls to the server, but keep
+      // HTML navigations (/collab/new, /collab/:id) in the SPA.
+      "/collab": {
+        // Match entry.tsx's getCurrentUrl() fallback semantics exactly, so a
+        // container or remote dev server (VITE_OPENCODE_SERVER_HOST set) gets
+        // proxied correctly instead of always being sent to localhost.
+        target: `http://${process.env.VITE_OPENCODE_SERVER_HOST ?? "localhost"}:${process.env.VITE_OPENCODE_SERVER_PORT ?? "4096"}`,
+        changeOrigin: true,
+        bypass(req) {
+          if (req.headers.accept?.includes("text/html")) return "/index.html"
+        },
+      },
+    },
   },
   build: {
     target: "esnext",

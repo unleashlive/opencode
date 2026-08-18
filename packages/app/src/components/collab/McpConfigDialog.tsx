@@ -1,11 +1,14 @@
 import { createSignal, Show } from "solid-js"
 import { useCollab } from "@/context/collab"
-import { BTN_PRIMARY } from "./ui"
+import { CollabDialog } from "./CollabDialog"
+import { BTN_GHOST, BTN_PRIMARY, FIELD, LABEL_MICRO, TEXT_ACTION } from "./ui"
 
 /**
  * Dialog for the Driver to configure the Unleash Live Cirrus MCP server.
  * Saves an encrypted access token in the DB and writes a per-session
  * .opencode/opencode.json that enables the MCP for the native session.
+ *
+ * Shell is the host dialog (./CollabDialog.tsx).
  */
 export function McpConfigDialog(props: { onClose: () => void }) {
   const collab = useCollab()
@@ -46,87 +49,71 @@ export function McpConfigDialog(props: { onClose: () => void }) {
   }
 
   return (
-    <div
-      class="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      style="z-index:99999"
-      onClick={props.onClose}
+    <CollabDialog
+      title="Unleash Live MCP"
+      description="Connect this session to the Unleash Live Cirrus platform. The token is encrypted on this server and never leaves it."
+      onClose={props.onClose}
+      fit
     >
-      <div
-        class="border border-border-weak-base rounded-xl p-6 w-full max-w-md shadow-2xl bg-background-base flex flex-col gap-4"
-        style="position:relative;z-index:100000"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div>
-          <h2 class="text-base font-semibold text-text-strong">Unleash Live MCP</h2>
-          <p class="text-xs text-text-weak mt-1">
-            Connect this collab session to the Unleash Live Cirrus platform. Enter your personal
-            access token (starts with <code class="font-mono">ul_pat_</code>). The token is
-            encrypted and stored securely — it never leaves this server.
-          </p>
-        </div>
-
+      <div class="flex flex-col gap-4 px-5 pb-5">
         <Show when={isConfigured()}>
-          <div class="flex items-center gap-2 text-xs bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg px-3 py-2">
-            <span>✓</span>
-            <span>MCP is active for this session.</span>
-          </div>
+          <p class="flex items-center gap-2 rounded-md border border-border-success-base bg-surface-success-weak px-3 py-2 text-12-regular text-text-on-success-base">
+            <span aria-hidden="true">✓</span>
+            MCP is active for this session.
+          </p>
         </Show>
 
         <div class="flex flex-col gap-1.5">
-          <label class="text-xs font-medium text-text-weak" for="mcp-token">
+          <label class={LABEL_MICRO} for="mcp-token">
             Access token
           </label>
           <input
             id="mcp-token"
             type="password"
             autocomplete="off"
+            autofocus
             placeholder="ul_pat_..."
-            class="w-full rounded-lg border border-border-weak-base bg-background-stronger text-sm text-text-strong px-3 py-2 font-mono placeholder:text-text-weak focus:outline-none focus:ring-1 focus:ring-blue-500"
+            class={`${FIELD} font-mono`}
             value={token()}
             onInput={(e) => setToken(e.currentTarget.value)}
-            onKeyDown={(e) => e.key === "Enter" && save()}
+            onKeyDown={(e) => e.key === "Enter" && void save()}
           />
-          <p class="text-[11px] text-text-weak">Stage is fixed to <code class="font-mono">cirrus</code>.</p>
+          <p class="text-[11px] text-text-base">
+            Starts with <code class="font-mono">ul_pat_</code>. Stage is fixed to <code class="font-mono">cirrus</code>.
+          </p>
         </div>
 
         <Show when={err()}>
-          <div class="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded px-3 py-2">{err()}</div>
+          <p class="rounded-md border border-border-critical-base bg-surface-critical-weak px-3 py-2 text-12-regular text-text-on-critical-base">
+            {err()}
+          </p>
         </Show>
 
         <Show when={done()}>
-          <div class="text-xs text-emerald-400 text-center">Saved — MCP enabled.</div>
+          <p class="text-center text-12-regular text-text-on-success-base">Saved, MCP enabled.</p>
         </Show>
 
-        <div class="flex items-center justify-between gap-2 pt-1">
+        <div class="flex items-center gap-2">
           <Show when={isConfigured()}>
             <button
               type="button"
               disabled={busy()}
-              onClick={remove}
-              class="px-3 py-1.5 text-xs rounded-md text-red-400 hover:text-red-300 hover:bg-red-400/10 disabled:opacity-50"
+              onClick={() => void remove()}
+              class={`${TEXT_ACTION} text-text-on-critical-base hover:text-text-on-critical-strong`}
             >
               Remove token
             </button>
           </Show>
-          <div class="flex gap-2 ml-auto">
-            <button
-              type="button"
-              onClick={props.onClose}
-              class="px-3 py-1.5 text-sm rounded-md text-text-weak hover:text-text-strong"
-            >
+          <div class="ml-auto flex gap-2">
+            <button type="button" onClick={props.onClose} class={`${BTN_GHOST} h-8 px-3`}>
               Cancel
             </button>
-            <button
-              type="button"
-              disabled={busy() || !token().trim()}
-              onClick={save}
-              class={`${BTN_PRIMARY} text-sm px-4 py-1.5 disabled:opacity-50`}
-            >
+            <button type="button" disabled={busy() || !token().trim()} onClick={() => void save()} class={`${BTN_PRIMARY} h-8 px-3`}>
               {busy() ? "Saving…" : "Save"}
             </button>
           </div>
         </div>
       </div>
-    </div>
+    </CollabDialog>
   )
 }

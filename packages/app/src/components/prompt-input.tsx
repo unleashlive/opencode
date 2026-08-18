@@ -1666,14 +1666,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                               variant="ghost"
                               size="normal"
                               style={control()}
-                              class="min-w-0 max-w-[320px] text-13-regular text-text-warning group"
+                              class="min-w-0 max-w-[320px] text-13-regular text-text-on-warning-base group"
                               onClick={() => {
                                 void import("@/components/dialog-connect-provider").then((x) => {
                                   dialog.show(() => <x.DialogConnectProvider provider={providerID()} />)
                                 })
                               }}
                             >
-                              <Icon name="triangle-warning" class="size-4 shrink-0 text-icon-warning-base" />
+                              <Icon name="warning" class="size-4 shrink-0 text-icon-warning-base" />
                               <span class="truncate">Reconnect {providerID()}</span>
                               <Icon name="chevron-down" size="small" class="shrink-0" />
                             </Button>

@@ -1,0 +1,31 @@
+/*
+ * Collab token layer (ENG-1).
+ *
+ * The only place the Collab UI is allowed to introduce colour of its own.
+ * Everything else (surfaces, text, borders, success / warning / critical
+ * intents) comes from the host semantic tokens in
+ * packages/ui/src/styles/theme.css.
+ *
+ * Dark mode is keyed off the attribute the host theme actually writes:
+ * applyThemeCss() in packages/ui/src/theme/context.tsx sets
+ * `document.documentElement.dataset.colorScheme`, i.e. `data-color-scheme`.
+ * (`data-theme` holds the theme id such as "oc-2", not the light/dark mode,
+ * so it is the wrong hook for this.)
+ *
+ * Soft / line variants are derived from the accent with color-mix so the two
+ * hex values below stay the single source of truth.
+ */
+
+:root {
+  --collab-accent: #4d6ae3;
+  --collab-accent-ink: #ffffff;
+  --collab-accent-soft: color-mix(in srgb, var(--collab-accent) 10%, transparent);
+  --collab-accent-line: color-mix(in srgb, var(--collab-accent) 35%, transparent);
+}
+
+html[data-color-scheme="dark"] {
+  --collab-accent: #7e8dff;
+  --collab-accent-ink: #14162b;
+  --collab-accent-soft: color-mix(in srgb, var(--collab-accent) 14%, transparent);
+  --collab-accent-line: color-mix(in srgb, var(--collab-accent) 40%, transparent);
+}

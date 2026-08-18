@@ -742,7 +742,7 @@ function ClaudeCredentialsSection(props: { onUploadComplete: () => void }) {
   return (
     <div class="border-t border-border-base pt-4 flex flex-col gap-3">
       <Show when={status() === null}>
-        <div class="text-13-regular text-text-dimmed flex items-center gap-2">
+        <div class="text-12-regular text-text-weak flex items-center gap-2">
           <Spinner />
           <span>Checking Claude credentials…</span>
         </div>
@@ -750,10 +750,10 @@ function ClaudeCredentialsSection(props: { onUploadComplete: () => void }) {
 
       <Show when={status() !== null && !status()!.present}>
         <div class="flex flex-col gap-3">
-          <div class="flex items-start gap-2 text-13-regular text-text-warning">
-            <Icon name="triangle-warning" class="size-4 shrink-0 mt-0.5 text-icon-warning-base" />
+          <div class="flex items-start gap-2 text-12-regular text-text-on-warning-base">
+            <Icon name="warning" class="size-4 shrink-0 mt-0.5 text-icon-warning-base" />
             <div class="flex flex-col gap-0.5">
-              <span class="text-13-medium text-text-strong">No Claude credentials on this server</span>
+              <span class="text-12-medium text-text-strong">No Claude credentials on this server</span>
               <span class="text-text-base">Anthropic models won't be available until credentials are uploaded.</span>
             </div>
           </div>
@@ -772,24 +772,24 @@ function ClaudeCredentialsSection(props: { onUploadComplete: () => void }) {
 
       <Show when={status()?.present}>
         <div class="flex flex-col gap-3">
-          <div class="flex items-center gap-2 text-13-regular text-text-success">
+          <div class="flex items-center gap-2 text-12-regular text-text-on-success-base">
             <Icon name="circle-check" class="size-4 shrink-0 text-icon-success-base" />
             <div class="flex items-center gap-1.5 flex-wrap">
-              <span class="text-13-medium text-text-strong">Claude credentials active</span>
+              <span class="text-12-medium text-text-strong">Claude credentials active</span>
               <Show when={status()!.email}>
-                <span class="text-text-dimmed">·</span>
-                <span class="text-text-dimmed">{status()!.email}</span>
+                <span class="text-text-weak">·</span>
+                <span class="text-text-weak">{status()!.email}</span>
               </Show>
               <Show when={status()!.mtime}>
-                <span class="text-text-dimmed">·</span>
-                <span class="text-text-dimmed">refreshed {relativeTime(status()!.mtime!)}</span>
+                <span class="text-text-weak">·</span>
+                <span class="text-text-weak">refreshed {relativeTime(status()!.mtime!)}</span>
               </Show>
             </div>
           </div>
           <Show
             when={showUpload()}
             fallback={
-              <Button variant="ghost" size="small" class="w-auto self-start text-text-dimmed" onClick={() => setShowUpload(true)}>
+              <Button variant="ghost" size="small" class="w-auto self-start text-text-weak" onClick={() => setShowUpload(true)}>
                 Replace credentials
               </Button>
             }
@@ -814,11 +814,11 @@ function CredentialsForm(props: {
   return (
     <form onSubmit={props.onSubmit} class="flex flex-col gap-3">
       <div class="flex flex-col gap-1">
-        <div class="text-12-regular text-text-dimmed">
-          On your Mac: <code class="font-mono bg-surface-raised px-1 rounded text-text-base">security find-generic-password -s "Claude Code-credentials" -w</code>
+        <div class="text-12-regular text-text-weak">
+          On your Mac: <code class="font-mono bg-surface-raised-base px-1 rounded text-text-base">security find-generic-password -s "Claude Code-credentials" -w</code>
         </div>
         <textarea
-          class="w-full min-h-[80px] resize-y rounded-md border border-border-base bg-surface-base px-3 py-2 text-13-regular text-text-base placeholder:text-text-dimmed focus:outline-none focus:ring-1 focus:ring-border-focus font-mono"
+          class="w-full min-h-[80px] resize-y rounded-md border border-border-base bg-surface-base px-3 py-2 text-12-regular text-text-base placeholder:text-text-weak focus:outline-none focus:ring-1 focus:ring-border-focus font-mono"
           placeholder='{"claudeAiOauth":{"accessToken":"...","refreshToken":"..."}}'
           value={props.json}
           onInput={(e) => props.onInput(e.currentTarget.value)}
@@ -826,7 +826,7 @@ function CredentialsForm(props: {
         />
       </div>
       <Show when={props.error}>
-        <p class="text-12-regular text-text-critical">{props.error}</p>
+        <p class="text-12-regular text-text-on-critical-base">{props.error}</p>
       </Show>
       <div class="flex items-center gap-2">
         <Button

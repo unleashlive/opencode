@@ -1935,16 +1935,14 @@ export default function Page() {
               <ResizeHandle
                 direction="horizontal"
                 size={layout.session.width()}
-                // Allow a much wider drag range than upstream so users can
-                // either stretch the LLM-chat column very wide (collapsing
-                // the review/git-changes panel down to a thin sidebar) or
-                // narrow it to give the review panel most of the width.
-                // min: 280px — still wide enough for the conversation to be
-                //               readable
-                // max: innerWidth - 240 — leaves a 240px minimum for the
-                //               review panel (so its toggle/scroll stay
-                //               reachable).  Use the review-panel toggle to
-                //               hide it entirely.
+                // Wider drag range than upstream (min 450 / max 45vw) because
+                // this page also renders inside the collab iframe, which is
+                // roughly the viewport minus the two 300px rails: there
+                // window.innerWidth is the iframe's, so 45% of it falls below
+                // the 450px minimum and the handle has no range left at all.
+                // min 280 keeps the conversation readable; max leaves the
+                // review panel 240px, enough for its toggle and scroll (hide
+                // it entirely with the review-panel toggle).
                 min={280}
                 max={typeof window === "undefined" ? 1200 : Math.max(280, window.innerWidth - 240)}
                 onResize={(width) => {

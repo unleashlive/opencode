@@ -1,38 +1,40 @@
 /**
- * /collab/:id — Collab Session
+ * /collab/:id — Collab Session (SKU-1 IA)
  *
- * Layout:
- *  ┌────────────────┬───────────────────────────────────────┐
- *  │  Collab panel  │  Conversation (native session iframe)  │
- *  │    (1/4)       │            (3/4)                       │
- *  └────────────────┴───────────────────────────────────────┘
+ *  ┌──────────────────────────────────────────────────────────────────┐
+ *  │ Top bar: identity, repo + branch, people, invite, theme, overflow │
+ *  ├────────────┬────────────────────────────────────┬────────────────┤
+ *  │  Timeline  │  Agent stage                       │  Team chat     │
+ *  │  rail      │    status strip                    │  rail          │
+ *  │  (304px)   │    embedded opencode session       │  (296px,       │
+ *  │            │    (iframe)                        │  collapsible)  │
+ *  └────────────┴────────────────────────────────────┴────────────────┘
  *
- * The left panel handles participant management, role-based prompt
- * input, and the queue. The right panel embeds the full opencode
- * session UI via an iframe once the native session is created.
+ * Three dedicated surfaces replace the single mixed sidebar that used to stack
+ * participants, prompt hints, chat, queue, preview, PR, compact, export and
+ * repos into one 288px column. Below md the same three surfaces become tabs.
+ *
+ * The prompt textarea itself lives inside the iframe (so users keep every
+ * opencode shortcut); submissions there are intercepted via postMessage and
+ * routed through the collab queue. That wiring is unchanged.
  */
 
-import {
-  createSignal,
-  createResource,
-  createEffect,
-  createMemo,
-  onMount,
-  onCleanup,
-  For,
-  Show,
-} from "solid-js"
+import { createSignal, createResource, createEffect, createMemo, onMount, onCleanup, For, Show } from "solid-js"
 import { useParams } from "@solidjs/router"
+import { Icon } from "@opencode-ai/ui/icon"
+import { Spinner } from "@opencode-ai/ui/spinner"
 import { CollabProvider, useCollab } from "@/context/collab"
 import { InviteDialog } from "@/components/collab/InviteDialog"
 import { AddRepoDialog } from "@/components/collab/AddRepoDialog"
 import { TutorialDialog } from "@/components/collab/TutorialDialog"
 import { McpConfigDialog } from "@/components/collab/McpConfigDialog"
-import { TeamNoteComposer } from "@/components/collab/TeamNoteComposer"
-import { PreviewLauncher } from "@/components/collab/PreviewLauncher"
+import { TeamChatRail } from "@/components/collab/TeamNoteComposer"
+import { TimelineRail } from "@/components/collab/TimelineRail"
+import { SessionTopBar } from "@/components/collab/SessionTopBar"
+import { StatusStrip } from "@/components/collab/StatusStrip"
 import { base64Encode } from "@opencode-ai/core/util/encode"
-import type { CollabRole, Participant, PromptSuggestion, RepoPrResult } from "@opencode-ai/collab"
-import { BTN_PRIMARY, BTN_SUCCESS, BTN_SECONDARY, PILL_BRAND } from "@/components/collab/ui"
+import type { CollabRole } from "@opencode-ai/collab"
+import { BTN_GHOST } from "@/components/collab/ui"
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -42,664 +44,30 @@ interface Me {
   githubAvatarUrl: string
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function roleColor(role: CollabRole) {
-  return role === "driver"
-    ? "text-amber-400"
-    : role === "contributor"
-      ? "text-blue-400"
-      : "text-zinc-500"
-}
-
-function roleLabel(role: CollabRole) {
-  return role === "driver" ? "Driver" : role === "contributor" ? "Contributor" : "Viewer"
-}
-
-// ── Participant avatar ─────────────────────────────────────────────────────────
-
-function Avatar(props: { participant: Participant; size?: "sm" | "md" }) {
-  const s = props.size === "md" ? "w-8 h-8" : "w-6 h-6"
-  return (
-    <div class="relative flex-shrink-0">
-      <img
-        src={props.participant.githubAvatarUrl || `https://github.com/${props.participant.githubLogin}.png?size=32`}
-        alt={props.participant.githubLogin}
-        class={`${s} rounded-full bg-zinc-800`}
-      />
-      {/* Online dot uses INLINE style for the bg colour so it doesn't depend
-          on Tailwind JIT detection of the conditional class — that turned out
-          to be unreliable for the collab page in earlier builds, leaving the
-          dot transparent / page-coloured (looked black). */}
-      <span
-        class="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-zinc-900"
-        style={{
-          "background-color": props.participant.isOnline ? "#34d399" : "#52525b",
-        }}
-        title={props.participant.isOnline ? "Online" : "Offline"}
-      />
-    </div>
-  )
-}
-
-// ── Participant row (Avatar + name + typing dots + role) ───────────────────────
-
-/**
- * One row of the participants list.
- *
- * Pulled out as its own component to give the typing-dots a clean reactive
- * boundary.  Previously the dots were rendered inline inside the `<For>`
- * callback in CollabSessionInner — Solid's tracking *should* pick that up
- * (the `typing()` accessor reads the `typingUsers` signal) but the
- * compiler was apparently optimising the access away, and the dots never
- * appeared even though the SSE event fired.  An explicit component
- * boundary makes the dependency explicit.
- */
-function ParticipantRow(props: {
-  participant: Participant
-  typing: () => boolean
-  roleColorClass: string
-  roleLabel: string
-  /** Number of unread @-mentions for THIS participant (only ever non-zero for the local user). */
-  unreadMentions?: () => number
-}) {
-  const unread = () => props.unreadMentions?.() ?? 0
-  return (
-    <div class="flex items-center gap-2">
-      <div class="relative">
-        <Avatar participant={props.participant} size="sm" />
-        {/* Red mention badge — only shows on the local user's row when
-            they have unread @-mentions. */}
-        <Show when={unread() > 0}>
-          <span
-            class="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-1 rounded-full text-[9px] font-bold flex items-center justify-center"
-            style={{ "background-color": "#ef4444", color: "#fff" }}
-            title={`${unread()} unread @-mention${unread() === 1 ? "" : "s"}`}
-          >
-            {unread() > 9 ? "9+" : unread()}
-          </span>
-        </Show>
-      </div>
-      <span class="text-xs text-zinc-300 flex-1 truncate">{props.participant.githubLogin}</span>
-      <Show when={props.typing()}>
-        <span
-          class="flex items-center gap-1"
-          title={`${props.participant.githubLogin} is typing…`}
-          aria-label={`${props.participant.githubLogin} is typing`}
-        >
-          {/* Inline bg-colour + animation-delay so neither Tailwind JIT
-              detection nor arbitrary-value class compilation can break
-              the indicator. */}
-          <span
-            class="w-1.5 h-1.5 rounded-full animate-pulse"
-            style={{ "background-color": "#60a5fa", "animation-delay": "0ms" }}
-          />
-          <span
-            class="w-1.5 h-1.5 rounded-full animate-pulse"
-            style={{ "background-color": "#60a5fa", "animation-delay": "200ms" }}
-          />
-          <span
-            class="w-1.5 h-1.5 rounded-full animate-pulse"
-            style={{ "background-color": "#60a5fa", "animation-delay": "400ms" }}
-          />
-        </span>
-      </Show>
-      <span class={`text-[10px] ${props.roleColorClass}`}>{props.roleLabel}</span>
-    </div>
-  )
-}
-
-// ── Open-PR button ────────────────────────────────────────────────────────────
-
-/**
- * Driver-only button rendered in the left collab panel.  Calls
- * POST /collab/session/:id/pr which git-pushes the current branch and
- * opens a pull request on GitHub.  Surfaces the PR URL on success;
- * surfaces the GitHub error verbatim on failure (e.g. "no commits
- * yet").
- */
-function OpenPrButton() {
-  const collab = useCollab()
-  const [busy, setBusy] = createSignal(false)
-  const [results, setResults] = createSignal<RepoPrResult[]>([])
-  const [error, setError] = createSignal<string | null>(null)
-  // Lock the button out for the rest of the page lifetime when the branch
-  // has no commits yet.  The server-side wrap (github-pr.ts) returns a
-  // friendly 400 in that case; the SPA picks up on that exact wording so
-  // it doesn't have to know about the underlying GitHub 422.  Either side
-  // alone would do the job — keeping both is defence-in-depth (Q2 "both"
-  // path in the deploy review): the server stops bad PRs from being
-  // created, the client stops the user from re-clicking into the same
-  // error message a dozen times.
-  const [locked, setLocked] = createSignal(false)
-
-  /** Heuristic for the "no commits yet" condition.  Both the wrapped 400
-   *  ("No commits to open a PR with yet.") and the raw GitHub 422
-   *  ("No commits between …") fall in here, in case anything bypasses
-   *  the server-side wrap (older deployments, partial rollouts). */
-  function looksLikeEmptyBranch(message: string): boolean {
-    return /no commits (to open|between)/i.test(message)
-  }
-
-  async function openPr() {
-    setBusy(true)
-    setError(null)
-    try {
-      const { results: r } = await collab.openPullRequest()
-      setResults(r)
-      const opened = r.filter((x) => x.status === "opened")
-      // Lock only when there were repos and every one had no commits — nothing
-      // to PR until the LLM commits.  A mix of opened/errored stays clickable.
-      if (r.length > 0 && r.every((x) => x.status === "skipped")) setLocked(true)
-      // Auto-open just the first opened PR (not one tab per repo).
-      const first = opened[0]
-      if (first && first.status === "opened") window.open(first.url, "_blank", "noreferrer")
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      setError(message)
-      if (looksLikeEmptyBranch(message)) setLocked(true)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div class="px-3 py-3 border-t border-zinc-800/60 flex-shrink-0 space-y-1.5">
-      <button
-        type="button"
-        onClick={openPr}
-        disabled={busy() || locked()}
-        title={locked() ? "No commits on the collab branch yet — ask the LLM to make a commit first." : undefined}
-        class={`${BTN_SUCCESS} w-full py-2 text-sm`}
-      >
-        <Show
-          when={!busy()}
-          fallback={
-            <>
-              <svg class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Opening PR…
-            </>
-          }
-        >
-          {/* git-pull-request icon */}
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <circle cx="6" cy="6" r="2" />
-            <circle cx="6" cy="18" r="2" />
-            <circle cx="18" cy="18" r="2" />
-            <path stroke-linecap="round" d="M6 8v8M18 8v8" />
-          </svg>
-          Open Pull Request
-        </Show>
-      </button>
-      <Show when={results().length > 0}>
-        <div class="space-y-1">
-          <For each={results()}>
-            {(r) => (
-              <Show
-                when={r.status === "opened"}
-                fallback={
-                  <Show
-                    when={r.status === "skipped"}
-                    fallback={
-                      <div
-                        class="text-[11px] text-red-400 bg-red-400/10 border border-red-400/20 rounded px-2 py-1"
-                        title={r.status === "error" ? r.error : undefined}
-                      >
-                        {r.repo.split("/")[1] ?? r.repo}: {r.status === "error" ? r.error : ""}
-                      </div>
-                    }
-                  >
-                    <div class="text-[11px] text-zinc-500 truncate" title={`${r.repo}: no changes on the collab branch`}>
-                      {r.repo.split("/")[1] ?? r.repo}: no changes
-                    </div>
-                  </Show>
-                }
-              >
-                <a
-                  href={r.status === "opened" ? r.url : "#"}
-                  target="_blank"
-                  rel="noreferrer"
-                  class="block text-[11px] text-emerald-400 hover:text-emerald-300 truncate"
-                  title={r.status === "opened" ? r.url : undefined}
-                >
-                  → {r.repo.split("/")[1] ?? r.repo}: {r.status === "opened" ? r.url : ""}
-                </a>
-              </Show>
-            )}
-          </For>
-        </div>
-      </Show>
-      <Show when={error()}>
-        <div class="text-[11px] text-red-400 bg-red-400/10 border border-red-400/20 rounded px-2 py-1 whitespace-pre-wrap">
-          {error()}
-        </div>
-      </Show>
-    </div>
-  )
-}
-
-// ── Compact context button ────────────────────────────────────────────────────
-
-function CompactButton() {
-  const collab = useCollab()
-  const [busy, setBusy] = createSignal(false)
-  const [done, setDone] = createSignal(false)
-  const [err, setErr] = createSignal<string | null>(null)
-
-  async function compact() {
-    setBusy(true)
-    setDone(false)
-    setErr(null)
-    try {
-      await collab.compact()
-      setDone(true)
-      setTimeout(() => setDone(false), 3000)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div class="px-3 pb-3 flex-shrink-0 space-y-1">
-      <button
-        type="button"
-        onClick={compact}
-        disabled={busy()}
-        title="Summarise older messages to free up context tokens"
-        class={`${BTN_SECONDARY} w-full py-1.5 text-xs`}
-      >
-        <Show when={!busy()} fallback={
-          <>
-            <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-            Compacting…
-          </>
-        }>
-          <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M8 9l4-4 4 4M8 15l4 4 4-4" />
-          </svg>
-          <Show when={done()} fallback="Compact context">Context compacted ✓</Show>
-        </Show>
-      </button>
-      <Show when={err()}>
-        <div class="text-[10px] text-red-400">{err()}</div>
-      </Show>
-    </div>
-  )
-}
-
-// ── Session export ────────────────────────────────────────────────────────────
-
-function formatExportMarkdown(data: {
-  session: { id: string; name: string; branch: string | null; repos: string[]; createdAt: Date; participants: Array<{ githubLogin: string; role: string }> }
-  suggestions: Array<{ authorGithubLogin: string; content: string; status: string; model?: string; agent?: string; variant?: string; createdAt: Date }>
-}): string {
-  const { session, suggestions } = data
-  const date = new Date(session.createdAt).toISOString().split("T")[0]
-  const repoList = session.repos.join(", ") || "—"
-
-  const lines: string[] = [
-    `# Collab Session: ${session.name}`,
-    ``,
-    `| Field | Value |`,
-    `|-------|-------|`,
-    `| Branch | \`${session.branch ?? "—"}\` |`,
-    `| Repos | ${repoList} |`,
-    `| Created | ${date} |`,
-    `| Participants | ${session.participants.map((p) => `@${p.githubLogin} (${p.role})`).join(", ")} |`,
-    ``,
-    `---`,
-    ``,
-    `## Prompt History`,
-    ``,
-  ]
-
-  const submitted = suggestions.filter((s) => s.status === "submitted" || s.status === "approved" || s.status === "in_flight")
-
-  if (submitted.length === 0) {
-    lines.push("_No prompts submitted yet._")
-  } else {
-    for (const s of submitted) {
-      const ts = new Date(s.createdAt).toISOString().replace("T", " ").slice(0, 16)
-      const modelLabel = s.model ? s.model.split("/").pop() : null
-      const meta = [modelLabel, s.variant, s.agent ? `agent:${s.agent}` : null].filter(Boolean).join(" · ")
-      lines.push(`### [${ts}] @${s.authorGithubLogin}${meta ? `  ·  ${meta}` : ""}`)
-      lines.push(``)
-      for (const line of s.content.split("\n")) lines.push(`> ${line}`)
-      lines.push(``)
-      lines.push(`---`)
-      lines.push(``)
-    }
-  }
-
-  return lines.join("\n")
-}
-
-function ExportButton() {
-  const collab = useCollab()
-  const [busy, setBusy] = createSignal(false)
-  const [err, setErr] = createSignal<string | null>(null)
-
-  async function exportSession() {
-    const sessionId = collab.session()?.id
-    if (!sessionId) return
-    setBusy(true)
-    setErr(null)
-    try {
-      const res = await fetch(`/collab/session/${sessionId}/export`)
-      if (!res.ok) throw new Error(`Export failed (${res.status})`)
-      const data = await res.json()
-      const md = formatExportMarkdown(data)
-      const blob = new Blob([md], { type: "text/markdown" })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `collab-${collab.session()?.name?.replace(/[^a-z0-9]/gi, "-").toLowerCase() ?? sessionId}.md`
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div class="px-3 pb-2 flex-shrink-0">
-      <button
-        type="button"
-        onClick={exportSession}
-        disabled={busy()}
-        class="w-full text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors flex items-center justify-center gap-1.5 py-1"
-      >
-        <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-        </svg>
-        {busy() ? "Exporting…" : "Export session"}
-      </button>
-      <Show when={err()}>
-        <div class="text-[10px] text-red-400 text-center mt-1">{err()}</div>
-      </Show>
-    </div>
-  )
-}
-
-// ── Prompt input (role-aware) ─────────────────────────────────────────────────
-
-function PromptInput(props: {
-  collabSessionId: string
-  role: CollabRole
-  queueMode: "fifo" | "vote"
-  onSent: () => void
-}) {
-  const [text, setText] = createSignal("")
-  const [busy, setBusy] = createSignal(false)
-  const [sendError, setSendError] = createSignal<string | null>(null)
-
-  const isDriver = () => props.role === "driver"
-  const isContributor = () => props.role === "contributor"
-  /** Driver in FIFO mode → prompt goes straight to the LLM (no approval). */
-  const isDirectSend = () => isDriver() && props.queueMode === "fifo"
-
-  async function submit(e: Event) {
-    e.preventDefault()
-    const content = text().trim()
-    if (!content || busy()) return
-    setBusy(true)
-    setSendError(null)
-    try {
-      const res = await fetch(`/collab/session/${props.collabSessionId}/prompt`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
-        setSendError((err as any).error ?? "Failed to send")
-        return
-      }
-      setText("")
-      props.onSent()
-    } catch (err) {
-      setSendError(String(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Show when={props.role !== "viewer"} fallback={
-      <div class="px-3 py-2 text-xs text-zinc-600 text-center">
-        Viewer — read only
-      </div>
-    }>
-      <form onSubmit={submit} class="flex flex-col gap-2">
-        <textarea
-          value={text()}
-          onInput={(e) => setText(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault()
-              submit(e)
-            }
-          }}
-          placeholder={
-            isDirectSend()
-              ? "Send a prompt… (⌘↵)"
-              : isDriver()
-                ? "Add a prompt to the pool… (⌘↵)"
-                : "Suggest a prompt… (⌘↵)"
-          }
-          rows={3}
-          class="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blue-500 resize-none"
-        />
-        <Show when={sendError()}>
-          <p class="text-xs text-red-400">{sendError()}</p>
-        </Show>
-        <button
-          type="submit"
-          disabled={busy() || !text().trim()}
-          class={`${isDriver() ? BTN_PRIMARY : BTN_SECONDARY} w-full py-2 text-sm`}
-        >
-          {busy()
-            ? "Sending…"
-            : isDirectSend()
-              ? "Send"
-              : isDriver()
-                ? "Add to Pool"
-                : "Suggest"}
-        </button>
-      </form>
-    </Show>
-  )
-}
-
-// ── Queue item ────────────────────────────────────────────────────────────────
-
-/** The fixed set of emoji shown in the reaction bar (kept in sync with
- *  REACTION_EMOJIS in packages/collab/src/types.ts). */
-const REACTION_BAR: readonly string[] = ["👍", "👎", "🔥", "🚀", "❤️", "😄"]
-
-/** Match GitHub-style @-mentions (1–39 chars from [A-Za-z0-9-], start
- *  with alnum).  Mirrors the server-side MENTION_RE in mentions.ts. */
-const MENTION_RE = /(^|\s)(@[A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/g
-
-/** Render free-text content with @-mentions highlighted as inline pills. */
-function renderMentions(text: string) {
-  const parts: Array<string | { mention: string }> = []
-  let lastIndex = 0
-  MENTION_RE.lastIndex = 0
-  let m: RegExpExecArray | null
-  while ((m = MENTION_RE.exec(text)) !== null) {
-    const start = m.index + m[1]!.length // skip the leading whitespace/start
-    if (start > lastIndex) parts.push(text.slice(lastIndex, start))
-    parts.push({ mention: m[2]! })
-    lastIndex = MENTION_RE.lastIndex
-  }
-  if (lastIndex < text.length) parts.push(text.slice(lastIndex))
-  return parts.map((p) =>
-    typeof p === "string" ? (
-      p
-    ) : (
-      <span
-        class="inline-block px-1 rounded font-medium"
-        style={{ "background-color": "rgba(96,165,250,0.18)", color: "#60a5fa" }}
-      >
-        {p.mention}
-      </span>
-    ),
-  )
-}
-
-function QueueItem(props: {
-  suggestion: PromptSuggestion
-  myRole: CollabRole
-  myLogin: string
-  onApprove?: (id: string) => Promise<void>
-  onReject?: (id: string) => void
-  onVote?: (id: string) => void
-  onReact?: (id: string, emoji: string) => void
-}) {
-  const s = props.suggestion
-  const [approving, setApproving] = createSignal(false)
-  const [approveError, setApproveError] = createSignal<string | null>(null)
-
-  async function handleApprove() {
-    setApproving(true)
-    setApproveError(null)
-    try {
-      await props.onApprove?.(s.id)
-    } catch (err) {
-      setApproveError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setApproving(false)
-    }
-  }
-
-  return (
-    <div class="px-3 py-2 border-b border-zinc-800/60 last:border-0">
-      <div class="flex items-start gap-2">
-        <img
-          src={`https://github.com/${s.authorGithubLogin}.png?size=24`}
-          class="w-5 h-5 rounded-full flex-shrink-0 mt-0.5"
-          alt={s.authorGithubLogin}
-        />
-        <div class="min-w-0 flex-1">
-          <p class="text-xs text-zinc-300 whitespace-pre-wrap break-words leading-relaxed">
-            {renderMentions(s.content)}
-          </p>
-          <div class="flex items-center gap-2 mt-1">
-            <span class="text-[10px] text-zinc-600">{s.authorGithubLogin}</span>
-            <span class={`text-[10px] font-medium ${
-              s.status === "approved" ? "text-emerald-400" :
-              s.status === "rejected" ? "text-red-400" : "text-zinc-500"
-            }`}>
-              {s.status}
-            </span>
-            <Show when={s.voteScore > 0}>
-              <span class="text-[10px] text-blue-400">▲ {s.voteScore}</span>
-            </Show>
-          </div>
-        </div>
-      </div>
-      <Show when={s.status === "pending" && props.myRole === "driver"}>
-        <div class="flex flex-col gap-1 mt-2">
-          <div class="flex gap-1.5">
-            <button
-              onClick={handleApprove}
-              disabled={approving()}
-              class="flex-1 py-1 rounded text-xs bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 disabled:opacity-50 transition-colors"
-            >
-              {approving() ? "Approving…" : "Approve"}
-            </button>
-            <button
-              onClick={() => props.onReject?.(s.id)}
-              class="flex-1 py-1 rounded text-xs bg-red-600/20 text-red-400 hover:bg-red-600/30 transition-colors"
-            >
-              Reject
-            </button>
-          </div>
-          <Show when={approveError()}>
-            <p class="text-[10px] text-red-400">{approveError()}</p>
-          </Show>
-        </div>
-      </Show>
-      <Show when={s.status === "pending" && props.myRole !== "driver" && props.myRole !== "viewer"}>
-        <button
-          onClick={() => props.onVote?.(s.id)}
-          class="mt-1.5 px-2 py-0.5 rounded text-[10px] bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 transition-colors"
-        >
-          ▲ Vote
-        </button>
-      </Show>
-
-      {/* Reaction bar — non-Viewers only.  Each emoji is its own toggle;
-          re-clicking removes your own reaction.  Counts come from the
-          server-broadcast reaction map. */}
-      <Show when={props.myRole !== "viewer"}>
-        <div class="flex flex-wrap gap-1 mt-1.5">
-          <For each={REACTION_BAR}>
-            {(emoji) => {
-              const reactors = () => s.reactions?.[emoji] ?? []
-              const mine = () => reactors().includes(props.myLogin)
-              const count = () => reactors().length
-              return (
-                <button
-                  type="button"
-                  onClick={() => props.onReact?.(s.id, emoji)}
-                  title={count() > 0 ? reactors().join(", ") : `React with ${emoji}`}
-                  classList={{
-                    "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] border transition-colors": true,
-                    "bg-blue-500/20 text-blue-300 border-blue-500/40": mine(),
-                    "bg-zinc-800/60 text-zinc-500 border-zinc-700/40 hover:bg-zinc-700/60 hover:text-zinc-300": !mine(),
-                  }}
-                >
-                  <span>{emoji}</span>
-                  <Show when={count() > 0}>
-                    <span class="font-mono">{count()}</span>
-                  </Show>
-                </button>
-              )
-            }}
-          </For>
-        </div>
-      </Show>
-    </div>
-  )
-}
+/** Which surface the phone-width layout is showing. */
+type MobileView = "timeline" | "editor" | "chat"
 
 // ── Inner component (inside CollabProvider) ────────────────────────────────────
 
 function CollabSessionInner(props: { me: Me }) {
   const collab = useCollab()
   const [showInvite, setShowInvite] = createSignal(false)
-  const [queueOpen, setQueueOpen] = createSignal(true)
-  const [submitError, setSubmitError] = createSignal<string | null>(null)
-  // Mobile-only: which pane the phone-width bottom toggle shows.  Desktop
-  // (md+) always shows both panel + editor side-by-side and ignores this.
-  const [mobileView, setMobileView] = createSignal<"panel" | "editor">("panel")
-  // Drivers-only "+ Add repo" popover in the Repos section (mid-session add).
-  const [addRepoOpen, setAddRepoOpen] = createSignal(false)
   const [showTutorial, setShowTutorial] = createSignal(false)
   const [showMcpConfig, setShowMcpConfig] = createSignal(false)
+  const [addRepoOpen, setAddRepoOpen] = createSignal(false)
+  const [menuOpen, setMenuOpen] = createSignal(false)
+  const [submitError, setSubmitError] = createSignal<string | null>(null)
+  // Mobile only. Desktop (md+) always shows all three surfaces and ignores this.
+  const [mobileView, setMobileView] = createSignal<MobileView>("editor")
 
-  const myParticipant = () =>
-    collab.session()?.participants.find((p) => p.githubId === props.me.githubId)
-
+  const myParticipant = () => collab.session()?.participants.find((p) => p.githubId === props.me.githubId)
   const myRole = (): CollabRole => myParticipant()?.role ?? "viewer"
 
-  const pendingQueue = () => collab.queue().filter((s) => s.status === "pending")
-
-  function handleSent() {
-    // Nothing to do — SSE will update queue
-  }
+  /**
+   * Anything floating above the editor has to hide it: an iframe renders in its
+   * own composited layer and can paint over an overlay regardless of z-index.
+   */
+  const editorObscured = () => showInvite() || addRepoOpen() || showTutorial() || showMcpConfig() || menuOpen()
 
   /**
    * Listen for prompt submissions from inside the opencode iframe.  The
@@ -738,7 +106,7 @@ function CollabSessionInner(props: { me: Me }) {
       }
 
       // Typing indicator: forward to the server so other participants
-      // see a pulsing dot next to this user (when visibilityMode === "typing").
+      // see it in the team chat rail (when visibilityMode === "typing").
       if (data.type === "opencode:collab-typing") {
         if (myRole() === "viewer") return
         void collab.setTyping(Boolean(data.typing))
@@ -746,10 +114,9 @@ function CollabSessionInner(props: { me: Me }) {
       }
 
       // Native session switched inside the iframe (e.g. opencode's
-      // cross-session "go to session" popup).  Swap the whole collab page —
-      // including the participant sidebar — to the collab session that owns
-      // that native session, so the left panel matches the conversation shown
-      // on the right.
+      // cross-session "go to session" popup).  Swap the whole collab page to
+      // the collab session that owns that native session, so the rails match
+      // the conversation shown in the middle.
       if (data.type === "opencode:collab-session-changed") {
         const nativeId = typeof data.sessionId === "string" ? data.sessionId : ""
         if (!nativeId) return
@@ -764,7 +131,7 @@ function CollabSessionInner(props: { me: Me }) {
             const target = list.find((s) => s.sessionId === nativeId)
             if (target && target.id !== collab.session()?.id) {
               // Full page nav so CollabProvider remounts with the new session
-              // (fresh participants + SSE) — same pattern as the Collab pill.
+              // (fresh participants + SSE) — same pattern as the brand lockup.
               window.location.href = `/collab/${target.id}`
             }
           } catch {
@@ -779,518 +146,178 @@ function CollabSessionInner(props: { me: Me }) {
   })
 
   return (
-    <div class="flex flex-col md:flex-row h-dvh bg-zinc-950 text-zinc-100 overflow-hidden font-sans">
+    <div class="flex h-dvh flex-col overflow-hidden bg-background-base text-text-base">
+      <SessionTopBar
+        myRole={myRole()}
+        menuOpen={menuOpen}
+        setMenuOpen={setMenuOpen}
+        onInvite={() => setShowInvite(true)}
+        onTutorial={() => setShowTutorial(true)}
+        onMcpConfig={() => setShowMcpConfig(true)}
+        onAddRepo={() => setAddRepoOpen(true)}
+      />
 
-      {/* ── LEFT: Collab panel ───────────────────────────────────────────────
-          Desktop (md+): fixed 288px column, always visible.
-          Mobile: full-width and fills the height above the bottom toggle bar;
-          shown only when mobileView()==="panel".  `md:flex` always wins at md+
-          so the base flex/hidden from classList is mobile-only. */}
-      <div
-        class="w-full md:w-72 flex-col flex-1 md:flex-none border-b md:border-b-0 md:border-r border-zinc-800 bg-zinc-900/40 md:flex min-h-0"
-        classList={{ flex: mobileView() === "panel", hidden: mobileView() === "editor" }}
-      >
+      <div class="flex min-h-0 flex-1">
+        <TimelineRail myLogin={props.me.githubLogin} class={mobileView() === "timeline" ? "" : "hidden md:flex"} />
 
-        {/* Header */}
-        <div class="px-4 py-3 border-b border-zinc-800 flex items-center justify-between flex-shrink-0">
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2 mb-0.5">
-              {/* "Collab" pill links back to the home / new-session page so
-                  any participant can quickly hop to the list of all their
-                  sessions or create a new one.
+        {/* ── CENTER: agent stage ─────────────────────────────────────────── */}
+        <main
+          class="relative min-w-0 flex-1 flex-col md:flex"
+          classList={{ flex: mobileView() === "editor", hidden: mobileView() !== "editor" }}
+        >
+          <StatusStrip myRole={myRole()} />
 
-                  We deliberately force a FULL page navigation rather than a
-                  client-side SPA route change.  @solidjs/router intercepts
-                  same-origin <a href> clicks and tries to dynamic-import
-                  the target route's lazy chunk — that chunk's hashed
-                  filename rotates on every deploy, so a user with a stale
-                  bundle hits "Failed to fetch dynamically imported module".
-                  Hard navigation makes the browser fetch a fresh
-                  index.html + the latest bundle, sidestepping the issue. */}
-              <a
-                href="/collab/new"
-                title="Back to your collab sessions"
-                onClick={(e) => {
-                  e.preventDefault()
-                  window.location.href = "/collab/new"
-                }}
-                class={PILL_BRAND}
-              >
-                Collab
-              </a>
-            </div>
-            <h1 class="text-sm font-semibold text-zinc-100 truncate">
-              {collab.session()?.name ?? "Loading…"}
-            </h1>
-          </div>
-          <button
-            onClick={() => setShowTutorial(true)}
-            class="ml-2 p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 flex-shrink-0 transition-colors"
-            title="Quick start guide & keyboard shortcuts"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <circle cx="12" cy="12" r="10" stroke-linecap="round" stroke-linejoin="round" />
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" />
-              <circle cx="12" cy="17" r=".5" fill="currentColor" stroke="none" />
-            </svg>
-          </button>
-          <button
-            onClick={() => setShowInvite(true)}
-            class="ml-1 p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 flex-shrink-0 transition-colors"
-            title="Invite participants"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Role badge + agent/model status */}
-        <div class="px-4 py-2 border-b border-zinc-800/60 flex-shrink-0">
-          <div class="flex items-center gap-2">
-            <img
-              src={props.me.githubAvatarUrl || `https://github.com/${props.me.githubLogin}.png?size=24`}
-              class="w-5 h-5 rounded-full"
-              alt={props.me.githubLogin}
-            />
-            <span class="text-xs text-zinc-400">{props.me.githubLogin}</span>
-            <span class={`ml-auto text-xs font-medium ${roleColor(myRole())}`}>
-              {roleLabel(myRole())}
-            </span>
-            <button
-              onClick={async () => {
-                await fetch("/collab/auth/logout", { method: "POST" })
-                window.location.href = `/collab/auth/github?next=/collab/${collab.session()?.id ?? ""}`
-              }}
-              title="Sign out and re-authenticate with GitHub"
-              class="p-1 rounded text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800 transition-colors"
-            >
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
-              </svg>
-            </button>
-          </div>
-          {/* Agent / model pills — show last agent + model used by the LLM in this session */}
-          <Show when={collab.lastSuggestion()}>
-            {(s) => {
-              const agentName = () => s().agent ?? "build"
-              const modelName = () => {
-                const m = s().model
-                if (!m) return null
-                return m.includes("/") ? m.split("/").slice(1).join("/") : m
-              }
-              const variantName = () => s().variant
-              return (
-                <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                  <span class="inline-flex items-center gap-0.5 text-[10px] bg-zinc-800/60 text-zinc-400 rounded px-1.5 py-0.5 font-mono">
-                    🤖 {agentName()}
-                  </span>
-                  <Show when={modelName()}>
-                    {(m) => (
-                      <span class="inline-flex items-center gap-0.5 text-[10px] bg-zinc-800/60 text-zinc-400 rounded px-1.5 py-0.5 font-mono">
-                        {m()}
-                        <Show when={variantName()}>
-                          {(v) => <span class="text-zinc-500"> {v()}</span>}
-                        </Show>
-                      </span>
-                    )}
-                  </Show>
-                </div>
-              )
-            }}
-          </Show>
-        </div>
-
-        {/* Participants — inner list caps at ~6 rows and scrolls internally;
-            keeps the section from pushing the chat / queue below off-screen
-            when the session has many invitees. */}
-        <div class="px-4 py-3 border-b border-zinc-800/60 flex-shrink-0">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-[10px] text-zinc-600 uppercase tracking-wider font-medium">Participants</span>
-            <span class="text-[10px] text-zinc-600">
-              {collab.participants().filter(p => p.isOnline).length}/{collab.participants().length} online
-            </span>
-          </div>
-          <div class="space-y-1.5 max-h-40 overflow-y-auto overscroll-contain pr-1">
-            <For each={collab.participants()}>
-              {(p) => (
-                <ParticipantRow
-                  participant={p}
-                  typing={() => collab.typingUsers().has(p.githubLogin)}
-                  roleColorClass={roleColor(p.role)}
-                  roleLabel={roleLabel(p.role)}
-                  unreadMentions={
-                    p.githubId === props.me.githubId ? collab.unreadMentions : undefined
-                  }
-                />
-              )}
-            </For>
-          </div>
-        </div>
-
-        {/* Prompt input — the actual textarea lives in the opencode iframe on
-            the right (so users get all the opencode shortcuts: ⌘P, /, @,
-            attachments, drag/drop, history, etc).  Submissions there are
-            intercepted and routed through the collab queue via postMessage.
-            A compact one-line hint points users at the editor; the larger
-            real estate goes to the Team Notes composer below for human-to-
-            human side-chat with @-mentions (which fight opencode's `@` key
-            inside the iframe). */}
-        <div class="px-3 py-2 border-b border-zinc-800/60 flex-shrink-0 space-y-1">
-          <div class="text-[11px] text-zinc-500 leading-snug">
-            <span class="text-zinc-300">Prompt the LLM in the editor on the right →</span>{" "}
-            <span class="text-zinc-600">
-              {myRole() === "viewer"
-                ? "(Viewers read along.)"
-                : myRole() === "driver" && collab.session()?.queueMode === "fifo"
-                  ? "Sent prompts go straight to the LLM."
-                  : myRole() === "driver"
-                    ? "Your prompts join the vote pool."
-                    : "Your prompts go to the queue for Driver approval."}
-            </span>
-          </div>
           <Show when={submitError()}>
-            <div class="mt-1 text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded px-2 py-1">
-              {submitError()}
-            </div>
-          </Show>
-        </div>
-
-        {/* Team Notes — side-channel chat for the participants, never reaches
-            the LLM.  Owns its own `@` autocomplete so people can ping each
-            other without fighting opencode's file-mention popover. */}
-        <TeamNoteComposer readonly={myRole() === "viewer"} />
-
-        {/* Queue — takes the remaining vertical space in the sidebar and
-            scrolls internally when many prompt suggestions flow in.  The
-            `min-h-0` on both the container AND the scroll child is load-
-            bearing: a flex child defaults to `min-height: auto` (i.e.
-            expand to content), so without it the inner list grows past
-            the allotted flex-1 height and overflow never engages. */}
-        <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
-          <button
-            onClick={() => {
-              setQueueOpen(v => !v)
-              collab.clearMentions()
-            }}
-            class="flex-shrink-0 w-full px-3 py-2 flex items-center justify-between text-[10px] text-zinc-600 uppercase tracking-wider font-medium hover:text-zinc-400 transition-colors"
-          >
-            <span>Queue</span>
-            <div class="flex items-center gap-1.5">
-              <Show when={pendingQueue().length > 0}>
-                <span class="px-1.5 py-0.5 rounded-full bg-blue-600/30 text-blue-400 text-[10px] normal-case tracking-normal">
-                  {pendingQueue().length}
-                </span>
-              </Show>
-              <svg
-                class={`w-3.5 h-3.5 transition-transform ${queueOpen() ? "rotate-180" : ""}`}
-                fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </div>
-          </button>
-
-          <Show when={queueOpen()}>
-            <div class="flex-1 min-h-0 overflow-y-auto overscroll-contain">
-              <Show when={collab.queue().length === 0}>
-                <div class="px-4 py-3 text-xs text-zinc-600">No prompts in queue</div>
-              </Show>
-              <For each={collab.queue()}>
-                {(s) => (
-                  <QueueItem
-                    suggestion={s}
-                    myRole={myRole()}
-                    myLogin={props.me.githubLogin}
-                    onApprove={(id) => collab.approvesuggestion(id)}
-                    onReject={(id) => { collab.rejectSuggestion(id).catch(console.error) }}
-                    onVote={(id) => { collab.castVote(id).catch(console.error) }}
-                    onReact={(id, emoji) => { collab.react(id, emoji).catch(console.error) }}
-                  />
-                )}
-              </For>
-            </div>
-          </Show>
-        </div>
-
-        {/* Frontend live-preview launcher — renders only when the session
-            has a preview-capable repo (.opencode-preview.json present OR a
-            repo named "frontend").  See packages/opencode/src/collab/preview-launcher.ts
-            and ~/.claude/plans/frontend-live-preview.md.  Self-hides
-            otherwise; visible to all participants but only Drivers can click. */}
-        <PreviewLauncher />
-
-        {/* Open PR — Drivers only, only when at least one repo is linked. */}
-        <Show when={myRole() === "driver" && (collab.session()?.repos?.length ?? 0) > 0}>
-          <OpenPrButton />
-        </Show>
-
-        {/* Compact context — Drivers only, only when a native session exists. */}
-        <Show when={myRole() === "driver" && !!collab.session()?.sessionId}>
-          <CompactButton />
-        </Show>
-
-        {/* Unleash Live MCP — Driver only. */}
-        <Show when={myRole() === "driver"}>
-          <div class="px-4 pb-1">
-            <button
-              type="button"
-              onClick={() => setShowMcpConfig(true)}
-              class={`${BTN_SECONDARY} w-full py-1.5 text-xs flex items-center justify-center gap-1.5`}
-            >
-              <Show when={collab.mcpConfigured()} fallback={<span>Configure Unleash MCP</span>}>
-                <span class="text-emerald-400">●</span>
-                <span>Unleash MCP active</span>
-              </Show>
-            </button>
-          </div>
-        </Show>
-
-        {/* Export session — available to all participants. */}
-        <ExportButton />
-
-        {/* Repos — each row also shows the active branch in that repo.
-            The "preview :port" pills live next to the Repos title (rather
-            than top-right over the iframe) so they're anchored to the
-            workspace context they belong to. */}
-        <Show when={(collab.session()?.repos?.length ?? 0) > 0}>
-          <div class="px-4 py-3 border-t border-zinc-800/60 flex-shrink-0">
-            <div class="flex items-center gap-1.5 mb-1.5 flex-wrap">
-              <div class="text-[10px] text-zinc-600 uppercase tracking-wider font-medium">
-                Repos
-              </div>
-              {/* Preview pills only make sense for a preview-capable session
-                  (a frontend repo / one with .opencode-preview.json) — the dev
-                  server only runs stable for frontend code.  `availablePreview`
-                  is the same server signal that gates the Launch button, so the
-                  pill never appears for non-frontend sessions (where a detected
-                  port would just be another session's container-wide preview). */}
-              <Show when={collab.session()?.availablePreview}>
-                <For each={collab.previewPorts()}>
-                  {(port) => (
-                    <a
-                      href={collab.previewState()?.url ?? `/preview/`}
-                      target="_blank"
-                      rel="noreferrer"
-                      title={`Open live preview (served at ${collab.previewState()?.url ?? "/preview/"})`}
-                      class="flex items-center gap-1 text-[10px] text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-1.5 py-0.5 rounded-full border border-emerald-500/30 transition-colors"
-                    >
-                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      preview
-                      <svg class="w-2 h-2" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                      </svg>
-                    </a>
-                  )}
-                </For>
-              </Show>
-              {/* Drivers can add another repo mid-session — clones it, creates
-                  the session branch in it, announces it to the LLM, and it
-                  joins the next "Open PR" (one PR per repo). */}
-              <Show when={myRole() === "driver"}>
+            {(message) => (
+              <div class="flex min-h-8 shrink-0 items-center gap-2 border-b border-border-critical-base bg-surface-critical-weak px-4 py-1">
+                <span class="min-w-0 flex-1 text-12-regular text-text-on-critical-base">{message()}</span>
                 <button
                   type="button"
-                  onClick={() => setAddRepoOpen((v) => !v)}
-                  title="Add another repository to this session"
-                  class="ml-auto flex items-center gap-0.5 text-[10px] text-zinc-400 hover:text-zinc-200 bg-zinc-800/60 hover:bg-zinc-700/60 px-1.5 py-0.5 rounded-full border border-zinc-700/60 transition-colors"
+                  onClick={() => setSubmitError(null)}
+                  aria-label="Dismiss error"
+                  class="shrink-0 rounded px-1 text-[11px] font-[500] text-text-base outline-none hover:text-text-strong focus-visible:ring-2 focus-visible:ring-collab-accent-line"
                 >
-                  <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
-                  </svg>
-                  {addRepoOpen() ? "Close" : "Add"}
+                  Dismiss
                 </button>
+              </div>
+            )}
+          </Show>
+
+          {/* Iframe gate: no repos → render the recovery panel instead of the
+              iframe.  Server side enforces the same — /<base64>/?cs=<id> with
+              an empty-repos session 401s (see cookie-auth.ts).  Both are needed:
+              client side for UX (no broken iframe), server side for security
+              (no URL-crafting around the gate). */}
+          <Show
+            when={(collab.session()?.repos.length ?? 0) > 0}
+            fallback={
+              // A null session = not loaded yet (initial fetch or a reconnect in
+              // flight, e.g. during a deploy or an SSE drop) — show the
+              // preparing/connecting state, NOT the scary "No repositories
+              // linked" panel.  Only a LOADED session with genuinely zero repos
+              // gets EmptyReposPanel.  Without this guard a transient blip makes
+              // a session that HAS a repo look mis-configured.
+              <Show when={collab.session()} fallback={<PreparingWorkspacePanel />}>
+                <EmptyReposPanel />
               </Show>
-            </div>
-            {/* Repo list caps at ~5 rows and scrolls internally when the
-                session links to many repos — keeps the queue's flex-1
-                space from being squeezed. */}
-            <div class="max-h-40 overflow-y-auto overscroll-contain pr-1">
-              <For each={collab.session()?.repos ?? []}>
-                {(repo) => {
-                  // Prefer the live-read current HEAD per repo (works for
-                  // legacy sessions too where collab_session.branch is null
-                  // because the column didn't exist when they were created).
-                  // Fall back to the session-level branch as a secondary
-                  // source.
-                  const repoBranch = () =>
-                    collab.session()?.repoBranches?.[repo] ?? collab.session()?.branch ?? null
-                  return (
-                    <div class="py-1">
-                      <div class="flex items-center gap-1.5">
-                        <svg class="w-3 h-3 text-zinc-600 flex-shrink-0" fill="currentColor" viewBox="0 0 16 16">
-                          <path d="M2 2.5A2.5 2.5 0 014.5 0h8.75a.75.75 0 01.75.75v12.5a.75.75 0 01-.75.75h-2.5a.75.75 0 110-1.5h1.75v-2h-8a1 1 0 00-.714 1.7.75.75 0 01-1.072 1.05A2.495 2.495 0 012 11.5v-9zm10.5-1V9h-8c-.356 0-.694.074-1 .208V2.5a1 1 0 011-1h8z" />
-                        </svg>
-                        <span class="text-xs text-zinc-500 truncate">{repo.split("/")[1] ?? repo}</span>
-                      </div>
-                      <Show when={repoBranch()}>
-                        <div
-                          class="flex items-center gap-1.5 mt-0.5 ml-[18px]"
-                          title={`Current branch in ${repo}: ${repoBranch()}`}
-                        >
-                          <svg class="w-2.5 h-2.5 text-emerald-500/80 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                            <circle cx="6" cy="6" r="2" />
-                            <circle cx="6" cy="18" r="2" />
-                            <circle cx="18" cy="12" r="2" />
-                            <path stroke-linecap="round" d="M6 8v8M6 12c0-3.314 2.686-6 6-6h4" />
-                          </svg>
-                          <span class="text-[11px] text-emerald-400/90 font-mono truncate">
-                            {repoBranch()}
-                          </span>
-                        </div>
-                      </Show>
-                    </div>
-                  )
-                }}
-              </For>
-            </div>
-          </div>
-        </Show>
-      </div>
+            }
+          >
+            {/* Triple gate before the iframe mounts:
+                  1. initStatus === "ready"  — workspace clone + branch checkout
+                                                actually finished on the server.
+                  2. nativeSessionDirectory   — set by collab:native_session_linked.
+                  3. sessionId                — same SSE event.
 
-      {/* ── RIGHT: Conversation — opencode session iframe ────────────────────
-          Desktop: always visible beside the panel.  Mobile: shown only when
-          mobileView()==="editor" (md:flex wins at md+, so classLst is mobile). */}
-      <div
-        class="flex-1 flex-col min-w-0 relative md:flex"
-        classList={{ flex: mobileView() === "editor", hidden: mobileView() === "panel" }}
-      >
+                initStatus is the load-bearing one: the gate used to require only
+                (2) + (3), which the broken-fallback preWarm could satisfy even
+                after a clone failure — the iframe would mount pointing at an
+                empty workspace and the prompt input would lock up because
+                opencode's InstanceStore had nothing to attach to.  See
+                docs/adr/0001 and the fix/session commits.
 
-        {/* Top-right chrome — connection status only.  The preview-port
-            pills now live next to the "Repos" title in the left panel. */}
-        <Show when={!collab.isConnected()}>
-          <div class="absolute top-2 right-3 z-10 flex items-center gap-1.5 text-xs text-amber-500 bg-zinc-900/80 px-2 py-1 rounded-full border border-zinc-700/50">
-            <div class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-            Reconnecting…
-          </div>
-        </Show>
-
-        {/* Iframe gate: no repos → render the recovery panel instead of the
-            iframe.  Server side enforces the same — /<base64>/?cs=<id> with
-            an empty-repos session 401s (see cookie-auth.ts).  Both are needed:
-            client side for UX (no broken iframe), server side for security
-            (no URL-crafting around the gate). */}
-        <Show
-          when={(collab.session()?.repos.length ?? 0) > 0}
-          fallback={
-            // A null session = not loaded yet (initial fetch or a reconnect in
-            // flight, e.g. during a deploy or an SSE drop) — show the
-            // preparing/connecting state, NOT the scary "No repositories
-            // linked" panel.  Only a LOADED session with genuinely zero repos
-            // gets EmptyReposPanel.  Without this guard a transient blip makes a
-            // session that HAS a repo look mis-configured.
-            <Show when={collab.session()} fallback={<PreparingWorkspacePanel />}>
-              <EmptyReposPanel />
-            </Show>
-          }
-        >
-
-        {/* Triple gate before the iframe mounts:
-              1. initStatus === "ready"  — workspace clone + branch checkout
-                                            actually finished on the server.
-              2. nativeSessionDirectory   — set by collab:native_session_linked.
-              3. sessionId                — same SSE event.
-
-            initStatus is the load-bearing one this fix adds.  Previously
-            the gate only required (2) + (3), which the broken-fallback
-            preWarm could satisfy even after a clone failure — the iframe
-            would mount pointing at an empty workspace and the prompt input
-            would lock up because opencode's InstanceStore had nothing to
-            attach to.  See docs/adr/0001 and the fix/session commits.
-
-            initStatus === "failed" → the recovery panel takes over.  Driver
-            gets a retry button; everyone else sees the failure reason and
-            is told to wait. */}
-        <Show
-          when={collab.session()?.initStatus === "failed"}
-          fallback={
+                initStatus === "failed" → the recovery panel takes over.  Driver
+                gets a retry button; everyone else sees the failure reason and
+                is told to wait. */}
             <Show
-              when={
-                (collab.session()?.initStatus ?? "ready") === "ready" &&
-                collab.nativeSessionDirectory() &&
-                collab.session()?.sessionId
+              when={collab.session()?.initStatus === "failed"}
+              fallback={
+                <Show
+                  when={
+                    (collab.session()?.initStatus ?? "ready") === "ready" &&
+                    collab.nativeSessionDirectory() &&
+                    collab.session()?.sessionId
+                  }
+                  fallback={<PreparingWorkspacePanel />}
+                >
+                  {(_) => {
+                    const dir = collab.nativeSessionDirectory()!
+                    const sid = collab.session()!.sessionId!
+                    const cid = collab.session()!.id
+                    const sessionUrl = `/${base64Encode(dir)}/session/${sid}?embed=collab&cs=${encodeURIComponent(cid)}`
+                    return (
+                      <iframe
+                        src={sessionUrl}
+                        class="w-full flex-1 border-0 bg-background-base"
+                        title="Unleash Collab session"
+                        style={`flex: 1; width: 100%; height: 100%; display: block; ${editorObscured() ? "visibility: hidden;" : ""}`}
+                      />
+                    )
+                  }}
+                </Show>
               }
-              fallback={<PreparingWorkspacePanel />}
             >
-          {(_) => {
-            const dir = collab.nativeSessionDirectory()!
-            const sid = collab.session()!.sessionId!
-            const cid = collab.session()!.id
-            const sessionUrl = `/${base64Encode(dir)}/session/${sid}?embed=collab&cs=${encodeURIComponent(cid)}`
-            return (
-              <iframe
-                src={sessionUrl}
-                class="flex-1 w-full border-0 bg-zinc-950"
-                title="Collab session"
-                // Hide the iframe while the Invite modal is open — iframes
-                // can render in their own composited layer that ignores the
-                // parent's stacking context, so even a z-index:99999 modal
-                // can have iframe content bleed through.  Hiding outright
-                // sidesteps the problem entirely.
-                style={`flex: 1; width: 100%; height: 100%; display: block; ${showInvite() || addRepoOpen() || showTutorial() || showMcpConfig() ? "visibility: hidden;" : ""}`}
-              />
-            )
-          }}
+              <WorkspaceFailedPanel />
             </Show>
-          }
-        >
-          <WorkspaceFailedPanel />
-        </Show>
-        </Show>
+          </Show>
+        </main>
+
+        {/* ── RIGHT: team chat ────────────────────────────────────────────────
+            Two instances rather than one: the desktop rail can be collapsed to
+            a strip, and that strip must not be what a phone shows when the
+            Chat tab is selected. */}
+        <TeamChatRail readonly={myRole() === "viewer"} variant="rail" class="hidden md:flex" />
+        <TeamChatRail
+          readonly={myRole() === "viewer"}
+          variant="pane"
+          class={mobileView() === "chat" ? "md:hidden" : "hidden"}
+        />
       </div>
 
-      {/* Tutorial / help dialog */}
+      {/* Mobile-only surface switcher. Hidden at md+, where all three show. */}
+      <div role="tablist" aria-label="Session surfaces" class="flex shrink-0 border-t border-border-weak-base bg-surface-base md:hidden">
+        <MobileTab label="Timeline" active={mobileView() === "timeline"} onSelect={() => setMobileView("timeline")} />
+        <MobileTab label="Editor" active={mobileView() === "editor"} onSelect={() => setMobileView("editor")} />
+        <MobileTab
+          label="Chat"
+          active={mobileView() === "chat"}
+          badge={collab.unreadMentions() > 0}
+          onSelect={() => {
+            setMobileView("chat")
+            collab.clearMentions()
+          }}
+        />
+      </div>
+
       <Show when={showTutorial()}>
         <TutorialDialog onClose={() => setShowTutorial(false)} />
       </Show>
 
-      {/* Invite dialog */}
       <Show when={showInvite()}>
         <InviteDialog onClose={() => setShowInvite(false)} />
       </Show>
 
-      {/* Add-repo dialog — Drivers only.  Toggled by the "+ Add" control in the
-          Repos section; clones the picks onto the collab branch mid-session. */}
+      {/* Add-repo dialog — Drivers only.  Opened from the overflow menu; clones
+          the picks onto the collab branch mid-session. */}
       <Show when={addRepoOpen() && myRole() === "driver"}>
         <AddRepoDialog onClose={() => setAddRepoOpen(false)} />
       </Show>
 
-      {/* MCP config dialog — Drivers only. */}
       <Show when={showMcpConfig() && myRole() === "driver"}>
         <McpConfigDialog onClose={() => setShowMcpConfig(false)} />
       </Show>
-
-      {/* Mobile-only bottom toggle — switch between the collab panel and the
-          editor iframe.  Hidden at md+, where both panes show side-by-side. */}
-      <div class="md:hidden flex-shrink-0 flex border-t border-zinc-800 bg-zinc-950">
-        <button
-          type="button"
-          onClick={() => setMobileView("panel")}
-          class="flex-1 py-3 text-xs font-medium transition-colors"
-          classList={{
-            "text-white bg-zinc-800/60": mobileView() === "panel",
-            "text-zinc-500": mobileView() !== "panel",
-          }}
-        >
-          <span class="relative inline-flex items-center gap-1.5">
-            Session
-            <Show when={collab.unreadMentions() > 0}>
-              <span class="w-1.5 h-1.5 rounded-full" style={{ "background-color": "#ef4444" }} />
-            </Show>
-          </span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setMobileView("editor")}
-          class="flex-1 py-3 text-xs font-medium transition-colors border-l border-zinc-800"
-          classList={{
-            "text-white bg-zinc-800/60": mobileView() === "editor",
-            "text-zinc-500": mobileView() !== "editor",
-          }}
-        >
-          Editor
-        </button>
-      </div>
     </div>
+  )
+}
+
+function MobileTab(props: { label: string; active: boolean; badge?: boolean; onSelect: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={props.onSelect}
+      role="tab"
+      aria-selected={props.active}
+      classList={{
+        "flex min-h-11 flex-1 items-center justify-center gap-1.5 border-t-2 text-12-medium outline-none transition-colors duration-150 ease-out focus-visible:ring-2 focus-visible:ring-collab-accent-line motion-reduce:transition-none":
+          true,
+        "border-t-collab-accent text-text-strong": props.active,
+        "border-t-transparent text-text-base hover:text-text-strong": !props.active,
+      }}
+    >
+      {props.label}
+      <Show when={props.badge}>
+        <span class="size-1.5 rounded-full bg-collab-accent" aria-label="unread mentions" />
+      </Show>
+    </button>
   )
 }
 
@@ -1301,31 +328,26 @@ function CollabSessionInner(props: { me: Me }) {
 // `<Show>` in CollabSessionInner for the reasoning.
 //
 // Two phases:
-//   1. First 4 minutes — friendly rotating-status copy + animated icons.
-//      Big monorepos with submodules + a cold plugin cache can legitimately
-//      take a few minutes; the previous 30s timeout was rushing users into
-//      a "stalled" message before the server was actually done.
-//   2. After 4 minutes — assumes preWarm has truly stalled; shows a
-//      "still cooking" panel with a refresh link.  A reload re-triggers
-//      the SPA's data fetch + SSE handshake and the iframe remounts
-//      cleanly against whatever state the server has reached.
+//   1. First 4 minutes — rotating status copy.  Big monorepos with submodules
+//      and a cold plugin cache can legitimately take a few minutes; a 30s
+//      timeout used to rush users into a "stalled" message before the server
+//      was actually done.
+//   2. After 4 minutes — assumes preWarm has truly stalled; offers a refresh.
+//      A reload re-triggers the SPA's data fetch + SSE handshake and the iframe
+//      remounts cleanly against whatever state the server has reached.
 
 const PREPARING_TIMEOUT_MS = 4 * 60 * 1000
 
-/** Friendly rotating-status messages.  Cycles every ~3.5s while we wait so
- *  the user has something to read and feels progress is happening even
- *  though we have no real progress signal from the server. */
+/** Rotating status messages, cycled every ~3.5s. There is no real progress
+ *  signal from the server, so this is the honest stand-in: it names the step
+ *  the server is likely on rather than drawing a fake progress bar. */
 const PREPARING_TIPS: ReadonlyArray<string> = [
-  "Cloning your repositories…",
-  "Checking out the collab branch…",
-  "Installing the prepare-commit-msg hook…",
-  "Warming up the editor…",
-  "Bootstrapping the LLM session…",
-  "Almost there — hang tight 🙂",
-  "Brewing a fresh workspace for your team ☕",
-  "Polishing the file tree…",
-  "Tuning the typing indicators…",
-  "Setting up the prompt queue…",
+  "Cloning your repositories",
+  "Checking out the collab branch",
+  "Installing the prepare-commit-msg hook",
+  "Warming up the editor",
+  "Bootstrapping the agent session",
+  "Setting up the prompt queue",
 ] as const
 
 function PreparingWorkspacePanel() {
@@ -1339,122 +361,38 @@ function PreparingWorkspacePanel() {
     onCleanup(() => clearTimeout(handle))
   })
 
-  // Rotate the status tip every 3.5s while we're in the patient phase.
   createEffect(() => {
     if (stalled()) return
-    const interval = setInterval(() => {
-      setTipIndex((i) => (i + 1) % PREPARING_TIPS.length)
-    }, 3500)
+    const interval = setInterval(() => setTipIndex((i) => (i + 1) % PREPARING_TIPS.length), 3500)
     onCleanup(() => clearInterval(interval))
   })
 
   return (
-    <div class="flex-1 flex flex-col items-center justify-center text-center bg-zinc-950 px-6">
-      {/* Friendly animated icon: a pulsing ring with three orbiting dots.
-          Pure CSS animations + a single SVG so this still renders on the
-          slowest network without a JS framework hop. */}
-      <div class="relative w-20 h-20 mb-6 flex items-center justify-center">
-        {/* Outer pulse — slow breathing halo */}
-        <div
-          class="absolute inset-0 rounded-full bg-blue-500/10 animate-ping"
-          style={{ "animation-duration": "2.4s" }}
-        />
-        {/* Inner ring — solid base */}
-        <div class="absolute inset-2 rounded-full bg-zinc-800/70 border border-zinc-700/60" />
-        {/* Spinning gradient arc */}
-        <svg
-          class="absolute inset-0 w-full h-full text-blue-400 animate-spin"
-          style={{ "animation-duration": "2s" }}
-          fill="none"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <circle class="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" />
-          <path
-            class="opacity-90"
-            fill="currentColor"
-            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-          />
-        </svg>
-        {/* Center emoji — handcrafted little mascot */}
-        <span
-          class="relative text-2xl"
-          style={{ animation: "bounce 1.6s ease-in-out infinite" }}
-          aria-hidden="true"
-        >
-          🛠️
-        </span>
-      </div>
-
+    <div class="flex flex-1 flex-col items-center justify-center gap-3 bg-background-base px-6 text-center">
       <Show
         when={!stalled()}
         fallback={
           <>
-            <p class="text-sm font-medium text-zinc-300 mb-1">
-              Still cooking…
+            <p class="text-14-medium text-text-strong">Still working on it</p>
+            <p class="max-w-sm text-12-regular text-text-base">
+              Your workspace is taking longer than usual to come up. This happens with very large repos or on a cold
+              worker. Refreshing reconnects you; your session and chat history are safe on the server.
             </p>
-            <p class="text-xs text-zinc-500 mb-4 max-w-sm">
-              Your workspace is taking longer than usual to come up.  This can
-              happen with very large repos or on a cold worker.  If you'd
-              rather not wait any more, refresh to reconnect — your session
-              and chat history are safe on the server.
-            </p>
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              class="text-xs px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:text-white transition-colors"
-            >
+            <button type="button" onClick={() => window.location.reload()} class={`${BTN_GHOST} h-7 px-3`}>
               Refresh
             </button>
           </>
         }
       >
-        <p class="text-sm font-medium text-zinc-300 mb-2">
-          Preparing your collab session
-        </p>
-
-        {/* Rotating tip — fades in/out via key swap so each message gets
-            a soft fade rather than a hard cut.  The `key={...}` forces
-            Solid to re-mount this node when the index changes, which
-            re-triggers the CSS animation. */}
-        <p
-          class="text-xs text-zinc-400 max-w-sm h-4 transition-opacity"
-          style={{ animation: "fadeIn 0.6s ease-out" }}
-          aria-live="polite"
-        >
+        <Spinner class="size-5 text-icon-base" />
+        <p class="text-14-medium text-text-strong">Preparing your collab session</p>
+        <p class="h-4 text-12-regular text-text-base" aria-live="polite">
           {PREPARING_TIPS[tipIndex()]}
         </p>
-
-        <p class="text-[11px] text-zinc-600 mt-4 max-w-sm leading-relaxed">
-          This usually takes <span class="text-zinc-400">30 seconds to a few minutes</span> —
-          we're cloning repos, checking out the branch, and warming up the
-          editor.  Be patient ✨
+        <p class="max-w-sm font-mono text-[10.5px] text-text-base">
+          usually 30 seconds to a few minutes
         </p>
-
-        {/* Bouncing dots — secondary "we're alive" signal in case the tip
-            text feels static. */}
-        <div class="mt-5 flex items-center gap-1.5">
-          <span class="w-1.5 h-1.5 rounded-full bg-blue-400/80" style={{ animation: "bounce 1.4s ease-in-out -0.32s infinite" }} />
-          <span class="w-1.5 h-1.5 rounded-full bg-blue-400/80" style={{ animation: "bounce 1.4s ease-in-out -0.16s infinite" }} />
-          <span class="w-1.5 h-1.5 rounded-full bg-blue-400/80" style={{ animation: "bounce 1.4s ease-in-out 0s infinite" }} />
-        </div>
       </Show>
-
-      {/* Local keyframes — kept here so this component is self-contained
-          and doesn't depend on Tailwind's JIT picking up `animate-bounce`
-          elsewhere in the build.  Tailwind ships these globally but only
-          when the matching utility class is referenced somewhere; we use
-          inline `animation: bounce ...` so we declare the keyframes here. */}
-      <style>{`
-        @keyframes fadeIn {
-          0% { opacity: 0; transform: translateY(2px); }
-          100% { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes bounce {
-          0%, 100% { transform: translateY(-15%); animation-timing-function: cubic-bezier(0.8, 0, 1, 1); }
-          50%      { transform: translateY(0);    animation-timing-function: cubic-bezier(0, 0, 0.2, 1); }
-        }
-      `}</style>
     </div>
   )
 }
@@ -1490,33 +428,16 @@ function WorkspaceFailedPanel() {
   }
 
   return (
-    <div class="flex-1 flex flex-col items-center justify-center text-center bg-zinc-950 px-6">
-      {/* Warning-style icon: red exclamation in a tinted circle */}
-      <div class="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center mb-5">
-        <svg
-          class="w-8 h-8 text-red-400"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0 3.75h.008m6.992-7.5a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-      </div>
-
-      <p class="text-sm font-medium text-zinc-200 mb-1">
-        Workspace setup failed
-      </p>
-
-      <p class="text-xs text-zinc-500 max-w-md mb-3">
-        The server couldn't finish preparing this session's workspace.  Most
-        often this is a transient git or network issue; a retry usually
-        clears it.
+    <div class="flex flex-1 flex-col items-center justify-center gap-3 bg-background-base px-6 text-center">
+      <Icon name="warning" class="size-6 text-text-on-critical-base" />
+      <p class="text-14-medium text-text-strong">Workspace setup failed</p>
+      <p class="max-w-md text-12-regular text-text-base">
+        The server could not finish preparing this session's workspace. Most often this is a transient git or network
+        issue and a retry clears it.
       </p>
 
       <Show when={collab.session()?.initError}>
-        <pre class="text-[11px] text-red-300/80 bg-red-500/5 border border-red-500/20 rounded px-3 py-2 mb-4 max-w-md overflow-x-auto whitespace-pre-wrap">
+        <pre class="max-w-md overflow-x-auto whitespace-pre-wrap rounded-md border border-border-critical-base bg-surface-critical-weak px-3 py-2 text-left font-mono text-[10.5px] text-text-on-critical-base">
           {collab.session()!.initError}
         </pre>
       </Show>
@@ -1524,29 +445,22 @@ function WorkspaceFailedPanel() {
       <Show
         when={isDriver()}
         fallback={
-          <p class="text-[11px] text-zinc-600 max-w-sm">
-            Only a Driver can retry workspace setup.  Hang tight while someone
-            with Driver access kicks it off.
+          <p class="max-w-sm text-12-regular text-text-base">
+            Only a Driver can retry workspace setup. Hang tight while someone with Driver access kicks it off.
           </p>
         }
       >
-        <button
-          type="button"
-          onClick={retry}
-          disabled={retrying()}
-          class="text-xs px-4 py-2 rounded-md bg-blue-600/20 border border-blue-500/40 text-blue-200 hover:bg-blue-600/30 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
+        <button type="button" onClick={retry} disabled={retrying()} class={`${BTN_GHOST} h-7 px-3`}>
           {retrying() ? "Retrying…" : "Retry initialization"}
         </button>
 
         <Show when={retryErr()}>
-          <p class="mt-2 text-[11px] text-red-400">{retryErr()}</p>
+          <p class="text-[11px] text-text-on-critical-base">{retryErr()}</p>
         </Show>
 
-        <p class="text-[11px] text-zinc-600 mt-3 max-w-sm">
-          Retry wipes the server-side workspace and re-runs the shallow clone
-          + branch checkout.  Your session, prompts, and chat history are
-          unaffected.
+        <p class="max-w-sm text-12-regular text-text-base">
+          Retry wipes the server-side workspace and re-runs the shallow clone and branch checkout. Your session,
+          prompts and chat history are unaffected.
         </p>
       </Show>
     </div>
@@ -1569,10 +483,10 @@ interface FallbackRepo {
 
 /**
  * Repo multi-select + "Add" action.  Shared by the empty-session recovery
- * panel and the mid-session "+ Add" control.  `exclude` hides repos already
- * linked to the session; `onDone` fires after a clean add (no warnings) so a
- * popover can close itself.  Surfaces any per-repo branch-collision warnings
- * returned by the server.
+ * panel and the mid-session add flow.  `exclude` hides repos already linked to
+ * the session; `onDone` fires after a clean add (no warnings) so a popover can
+ * close itself.  Surfaces any per-repo branch-collision warnings returned by
+ * the server.
  */
 function RepoPicker(props: { exclude?: string[]; onDone?: () => void }) {
   const collab = useCollab()
@@ -1620,25 +534,25 @@ function RepoPicker(props: { exclude?: string[]; onDone?: () => void }) {
     <Show
       when={available().length > 0}
       fallback={
-        <div class="text-sm text-zinc-500 text-center py-2">
+        <p class="py-2 text-center text-12-regular text-text-base">
           {repos.loading ? "Loading repositories…" : "No more repositories to add."}
-        </div>
+        </p>
       }
     >
-      <div class="max-h-96 overflow-y-auto rounded-lg border border-zinc-800 divide-y divide-zinc-800 bg-zinc-900/40">
+      <div class="max-h-96 divide-y divide-border-weak-base overflow-y-auto rounded-md border border-border-weak-base bg-surface-base">
         <For each={available()}>
           {(repo) => (
-            <label class="flex items-start gap-3 px-3 py-2 cursor-pointer hover:bg-zinc-800/40">
+            <label class="flex min-h-9 cursor-pointer items-start gap-3 px-3 py-2 hover:bg-surface-base-hover">
               <input
                 type="checkbox"
-                class="mt-1"
+                class="mt-1 accent-collab-accent"
                 checked={selected().includes(repo.full_name)}
                 onChange={() => toggle(repo.full_name)}
               />
-              <span class="flex-1 min-w-0">
-                <span class="text-sm text-zinc-200 truncate block">{repo.full_name}</span>
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-12-medium text-text-strong">{repo.full_name}</span>
                 <Show when={repo.description}>
-                  <span class="text-xs text-zinc-500 line-clamp-1">{repo.description}</span>
+                  <span class="line-clamp-1 text-12-regular text-text-base">{repo.description}</span>
                 </Show>
               </span>
             </label>
@@ -1647,27 +561,22 @@ function RepoPicker(props: { exclude?: string[]; onDone?: () => void }) {
       </div>
 
       <Show when={err()}>
-        <div class="text-xs text-red-400 mt-2">{err()}</div>
+        <p class="mt-2 text-12-regular text-text-on-critical-base">{err()}</p>
       </Show>
       <Show when={warnings().length > 0}>
         <div class="mt-2 space-y-1">
           <For each={warnings()}>
             {(w) => (
-              <div class="text-[11px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded px-2 py-1">
+              <p class="rounded-md border border-border-warning-base bg-surface-warning-weak px-2 py-1 text-[11px] text-text-on-warning-base">
                 {w.message}
-              </div>
+              </p>
             )}
           </For>
         </div>
       </Show>
 
-      <div class="flex justify-end gap-2 mt-3">
-        <button
-          type="button"
-          class="px-3 py-1.5 text-sm rounded-md border border-zinc-700 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-          disabled={selected().length === 0 || adding()}
-          onClick={submit}
-        >
+      <div class="mt-3 flex justify-end">
+        <button type="button" class={`${BTN_GHOST} h-7 px-3`} disabled={selected().length === 0 || adding()} onClick={submit}>
           {adding() ? "Adding…" : `Add ${selected().length} repo${selected().length === 1 ? "" : "s"}`}
         </button>
       </div>
@@ -1680,18 +589,17 @@ function EmptyReposPanel() {
   const isDriver = () => collab.viewerRole() === "driver"
 
   return (
-    <div class="flex-1 flex flex-col items-center justify-center bg-zinc-950 p-8 overflow-auto">
-      <div class="max-w-2xl w-full">
-        <div class="text-center mb-6">
-          <div class="w-16 h-16 rounded-full bg-zinc-800/60 flex items-center justify-center mx-auto mb-4">
-            <svg class="w-8 h-8 text-zinc-500" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
-            </svg>
-          </div>
-          <h2 class="text-lg font-semibold text-zinc-200">No repositories linked</h2>
-          <p class="text-sm text-zinc-400 mt-1">
-            <Show when={isDriver()} fallback="A Driver of this session needs to add a repository before the workspace can open.">
-              Pick at least one repository to add to this collab session. The workspace and iframe open once it's cloned.
+    <div class="flex flex-1 flex-col items-center justify-center overflow-auto bg-background-base p-8">
+      <div class="w-full max-w-2xl rounded-lg border border-dashed border-border-weak-base p-6">
+        <div class="mb-5 text-center">
+          <h2 class="text-14-medium text-text-strong">No repositories linked</h2>
+          <p class="mt-1 text-12-regular text-text-base">
+            <Show
+              when={isDriver()}
+              fallback="A Driver of this session needs to add a repository before the workspace can open."
+            >
+              Pick at least one repository to add to this collab session. The workspace and editor open once it is
+              cloned.
             </Show>
           </p>
         </div>
@@ -1723,12 +631,9 @@ export default function CollabSessionPage() {
     <Show
       when={me()}
       fallback={
-        <div class="h-screen bg-zinc-950 flex items-center justify-center">
-          <div class="flex items-center gap-2 text-zinc-600 text-sm">
-            <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-            </svg>
+        <div class="flex h-dvh items-center justify-center bg-background-base">
+          <div class="flex items-center gap-2 text-12-regular text-text-base">
+            <Spinner class="size-4" />
             Loading…
           </div>
         </div>

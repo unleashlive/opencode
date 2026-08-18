@@ -1,25 +1,32 @@
 /**
- * Team Notes composer + feed for the collab left panel.
+ * Team chat rail for /collab/:id (SKU-1).
  *
- * A side-channel chat box where participants can ping each other with
- * `@mentions`, separate from the LLM prompt path.  Why this exists:
- * the opencode editor inside the iframe binds `@` to a file/agent
- * picker, so there's no way to cleanly type a user mention there.
- * This composer owns its own textarea and an autocomplete popover that
- * suggests session participants matching the current `@<partial>`
- * token.
+ * A side-channel chat where participants ping each other with `@mentions`,
+ * separate from the LLM prompt path.  Why it exists: the opencode editor inside
+ * the iframe binds `@` to a file/agent picker, so there is no way to type a
+ * user mention there.  This rail owns its own textarea and an autocomplete
+ * popover that suggests session participants matching the current `@<partial>`.
  *
  * Submitted notes:
  *   - hit POST /collab/session/:id/note
  *   - broadcast `collab:note_added` (renders in everyone's feed)
  *   - emit `collab:mention` events for any @-mentions matching a real
- *     participant (badge + desktop notification handled in the
- *     CollabProvider)
+ *     participant (badge + desktop notification handled in the CollabProvider)
+ *
+ * Previously this was a collapsible block stacked inside the one mixed sidebar.
+ * It is now the right-hand rail of the session page: day dividers, author rows,
+ * a typing line and the composer pinned to the bottom.  The rail collapses to a
+ * 40px strip and remembers that choice in localStorage.
  */
 
-import { createSignal, createMemo, Show, For, onCleanup } from "solid-js"
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { useCollab } from "@/context/collab"
+import { renderMentions } from "./mentions"
+import { BTN_ICON } from "./ui"
+import { clockTime, dayKey, dayLabel } from "./timeline-utils"
 import type { Participant, CollabNote } from "@opencode-ai/collab"
+
+const COLLAPSED_KEY = "collab:chat-rail-collapsed"
 
 /** Match the `@<partial>` token at the current caret — only when the
  *  caret is right after a token that has no whitespace between `@` and
@@ -46,61 +53,72 @@ function matchActiveMention(value: string, caret: number): { start: number; part
   return null
 }
 
-/** Render content with @-tokens highlighted as inline blue pills. */
-function renderMentions(text: string) {
-  const RE = /(^|\s)(@[A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))/g
-  const parts: Array<string | { mention: string }> = []
-  let last = 0
-  let m: RegExpExecArray | null
-  RE.lastIndex = 0
-  while ((m = RE.exec(text)) !== null) {
-    const start = m.index + m[1]!.length
-    if (start > last) parts.push(text.slice(last, start))
-    parts.push({ mention: m[2]! })
-    last = RE.lastIndex
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === "1"
+  } catch {
+    return false
   }
-  if (last < text.length) parts.push(text.slice(last))
-  return parts.map((p) =>
-    typeof p === "string" ? (
-      p
-    ) : (
-      <span
-        class="inline-block px-1 rounded font-medium"
-        style={{ "background-color": "rgba(96,165,250,0.18)", color: "#60a5fa" }}
-      >
-        {p.mention}
-      </span>
-    ),
-  )
 }
 
-function relativeTime(date: Date): string {
-  const diff = (Date.now() - date.getTime()) / 1000
-  if (diff < 60) return "just now"
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+function writeCollapsed(value: boolean) {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, value ? "1" : "0")
+  } catch {
+    // private mode / storage disabled — the rail just forgets the choice
+  }
 }
 
-export function TeamNoteComposer(props: {
+export function TeamChatRail(props: {
   /** Hide the composer (Viewer role). */
   readonly?: boolean
+  /**
+   * "rail" is the desktop column: fixed width, collapsible to a strip.
+   * "pane" is the mobile tab: full width, always expanded.
+   */
+  variant?: "rail" | "pane"
+  class?: string
 }) {
   const collab = useCollab()
+  const isRail = () => (props.variant ?? "rail") === "rail"
+
+  const [collapsed, setCollapsed] = createSignal(readCollapsed())
   const [text, setText] = createSignal("")
   const [sending, setSending] = createSignal(false)
   const [error, setError] = createSignal<string | null>(null)
   const [popoverOpen, setPopoverOpen] = createSignal(false)
   const [highlightIdx, setHighlightIdx] = createSignal(0)
-  // Collapsed by default keeps the sidebar compact — when notes are
-  // important the user expands; the unread count on the header chip is
-  // still visible while collapsed so they don't miss new chatter.
-  const [expanded, setExpanded] = createSignal(true)
   let textareaRef: HTMLTextAreaElement | undefined
-  // Tick re-evaluates the visible relative timestamps every 30s
-  const [tick, setTick] = createSignal(0)
-  const interval = setInterval(() => setTick((t) => t + 1), 30_000)
-  onCleanup(() => clearInterval(interval))
+
+  const myLogin = () => collab.participants().find((p) => p.githubId === collab.meGithubId())?.githubLogin
+
+  /** Everyone typing right now except the local user. */
+  const typing = createMemo(() => {
+    const me = myLogin()
+    return [...collab.typingUsers()].filter((login) => login !== me)
+  })
+
+  const typingLabel = createMemo(() => {
+    const who = typing()
+    if (who.length === 0) return null
+    if (who.length === 1) return `${who[0]} is typing`
+    if (who.length === 2) return `${who[0]} and ${who[1]} are typing`
+    return `${who.length} people are typing`
+  })
+
+  /** Notes bucketed into calendar days so the feed can show dividers. */
+  const dayGroups = createMemo(() => {
+    const groups: Array<{ key: string; label: string; notes: CollabNote[] }> = []
+    const now = Date.now()
+    for (const note of collab.notes()) {
+      const at = note.createdAt instanceof Date ? note.createdAt : new Date(note.createdAt as unknown as string)
+      const key = dayKey(at)
+      const last = groups[groups.length - 1]
+      if (last && last.key === key) last.notes.push(note)
+      else groups.push({ key, label: dayLabel(at, now), notes: [note] })
+    }
+    return groups
+  })
 
   /** The active @-mention edit at the current caret, if any. */
   const activeMention = createMemo(() => {
@@ -120,6 +138,17 @@ export function TeamNoteComposer(props: {
       .sort((a, b) => Number(b.isOnline) - Number(a.isOnline))
       .slice(0, 6)
   })
+
+  // Reading the rail is what marks mentions as read. Deliberately driven by
+  // user action rather than by an effect on visibility: both a desktop rail and
+  // a mobile pane are mounted at once, so an effect would clear the badge from
+  // the instance the phone is not even showing.
+  function toggleCollapsed() {
+    const next = !collapsed()
+    setCollapsed(next)
+    writeCollapsed(next)
+    if (!next) collab.clearMentions()
+  }
 
   function insertSuggestion(p: Participant) {
     const active = activeMention()
@@ -199,155 +228,235 @@ export function TeamNoteComposer(props: {
   }
 
   return (
-    <div class="border-b border-zinc-800/60 flex-shrink-0">
-      {/* Collapsible header — clicking the whole bar toggles open/closed.
-          Mirrors the Queue header pattern below for visual consistency. */}
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        class="w-full px-3 py-2 flex items-center justify-between text-[10px] text-zinc-600 uppercase tracking-wider font-medium hover:text-zinc-400 transition-colors"
-      >
-        <span>Team chat</span>
-        <div class="flex items-center gap-1.5">
+    <Show
+      when={!(isRail() && collapsed())}
+      fallback={
+        <aside class={`hidden w-10 shrink-0 flex-col items-center gap-2 border-l border-border-weak-base bg-surface-base py-2 md:flex ${props.class ?? ""}`}>
+          <button type="button" onClick={toggleCollapsed} aria-label="Expand team chat" title="Expand team chat" class={BTN_ICON}>
+            <ChevronLeft />
+          </button>
+          <span class="font-mono text-[10.5px] text-text-base [writing-mode:vertical-rl]">team chat</span>
           <Show when={collab.notes().length > 0}>
-            <span class="px-1.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400 text-[10px] normal-case tracking-normal">
-              {collab.notes().length}
-            </span>
+            <span class="font-mono text-[10.5px] text-text-weak [writing-mode:vertical-rl]">{collab.notes().length}</span>
           </Show>
-          <svg
-            class={`w-3.5 h-3.5 transition-transform ${expanded() ? "rotate-180" : ""}`}
-            fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
+          <Show when={collab.unreadMentions() > 0}>
+            <span class="size-1.5 rounded-full bg-collab-accent" title={`${collab.unreadMentions()} unread mentions`} />
+          </Show>
+        </aside>
+      }
+    >
+      <aside
+        class={`flex w-full min-h-0 flex-col border-border-weak-base bg-surface-base md:w-[296px] md:shrink-0 md:border-l ${props.class ?? ""}`}
+        aria-label="Team chat"
+        onClick={() => collab.clearMentions()}
+      >
+        <div class="flex h-11 shrink-0 items-center gap-2 border-b border-border-weak-base px-3">
+          <Show when={isRail()}>
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              aria-label="Collapse team chat"
+              title="Collapse team chat"
+              class={`${BTN_ICON} -ml-1.5`}
+            >
+              <ChevronRight />
+            </button>
+          </Show>
+          <span class="text-12-medium text-text-strong">Team chat</span>
+          <span class="ml-auto font-mono text-[10.5px] text-text-weak">
+            <Show when={collab.unreadMentions() > 0}>
+              <span class="text-collab-accent">{collab.unreadMentions()}</span>
+              <span class="text-text-weak">/</span>
+            </Show>
+            {collab.notes().length}
+          </span>
         </div>
-      </button>
 
-      <Show when={expanded()}>
-        <div class="px-3 pb-2 space-y-2">
-          {/* Scrolling notes feed.  Max-height keeps the composer in view; the
-              feed scrolls internally if there are many notes. */}
-          <NotesFeed notes={collab.notes()} tick={tick()} />
+        <NotesFeed groups={dayGroups()} />
 
-          <Show
-            when={!props.readonly}
-            fallback={<div class="text-[11px] text-zinc-600 italic">Viewers cannot post notes.</div>}
-          >
-            <div class="relative">
-              <textarea
-                ref={(el) => (textareaRef = el)}
-                value={text()}
-                onInput={handleInput}
-                onKeyDown={handleKeyDown}
-                onSelect={handleInput /* keep activeMention() in sync with caret */}
-                placeholder="Message the team — @mention to ping ⌘↵ to send"
-                rows={2}
-                disabled={sending()}
-                class="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blue-500 resize-none disabled:opacity-50"
-              />
-
-              {/* Autocomplete popover */}
-              <Show when={popoverOpen() && suggestions().length > 0}>
-                <div
-                  class="absolute left-0 right-0 -top-2 -translate-y-full z-20 rounded border border-zinc-700 bg-zinc-900 shadow-lg overflow-hidden"
-                  style={{ "max-height": "200px", "overflow-y": "auto" }}
-                >
-                  <For each={suggestions()}>
-                    {(p, i) => (
-                      <button
-                        type="button"
-                        onMouseDown={(e) => {
-                          // mousedown not click — click would fire after blur
-                          e.preventDefault()
-                          insertSuggestion(p)
-                        }}
-                        onMouseEnter={() => setHighlightIdx(i())}
-                        classList={{
-                          "w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs transition-colors": true,
-                          "bg-blue-500/20 text-blue-200": i() === highlightIdx(),
-                          "hover:bg-zinc-800 text-zinc-300": i() !== highlightIdx(),
-                        }}
-                      >
-                        <img
-                          src={p.githubAvatarUrl || `https://github.com/${p.githubLogin}.png?size=24`}
-                          alt=""
-                          class="w-4 h-4 rounded-full"
-                        />
-                        <span class="font-mono">@{p.githubLogin}</span>
-                        <Show when={p.isOnline}>
-                          <span class="ml-auto w-1.5 h-1.5 rounded-full" style={{ "background-color": "#34d399" }} />
-                        </Show>
-                      </button>
+        <div class="h-5 shrink-0 px-3">
+          <Show when={typingLabel()}>
+            {(label) => (
+              <p class="flex items-center gap-1 truncate text-[11px] text-text-base" aria-live="polite">
+                <span class="flex items-center gap-0.5" aria-hidden="true">
+                  <For each={[0, 200, 400]}>
+                    {(delay) => (
+                      <span
+                        class="size-1 rounded-full bg-collab-accent animate-pulse motion-reduce:animate-none"
+                        style={{ "animation-delay": `${delay}ms` }}
+                      />
                     )}
                   </For>
-                </div>
+                </span>
+                {label()}
+              </p>
+            )}
+          </Show>
+        </div>
+
+        <Show
+          when={!props.readonly}
+          fallback={
+            <p class="shrink-0 border-t border-border-weak-base px-3 py-2 font-mono text-[10.5px] text-text-base">
+              viewer · read only
+            </p>
+          }
+        >
+          <div class="relative shrink-0 border-t border-border-weak-base p-2">
+            <textarea
+              ref={(el) => (textareaRef = el)}
+              value={text()}
+              onInput={handleInput}
+              onKeyDown={handleKeyDown}
+              onSelect={handleInput /* keep activeMention() in sync with caret */}
+              onFocus={() => collab.clearMentions()}
+              placeholder="Message the team"
+              rows={2}
+              disabled={sending()}
+              aria-label="Team chat message"
+              class="w-full resize-none rounded-md border border-border-weak-base bg-surface-inset-base px-2 py-1.5 text-12-regular text-text-strong outline-none placeholder:text-text-weak focus-visible:ring-2 focus-visible:ring-collab-accent-line disabled:text-text-weak"
+            />
+            <div class="flex items-center gap-2 pt-1">
+              <span class="font-mono text-[10px] text-text-base">@ mention · cmd+enter send</span>
+              <Show when={sending()}>
+                <span class="ml-auto font-mono text-[10px] text-text-base">sending…</span>
               </Show>
             </div>
 
-            <Show when={error()}>
-              <div class="text-[10px] text-red-400">{error()}</div>
+            {/* Autocomplete popover */}
+            <Show when={popoverOpen() && suggestions().length > 0}>
+              <div
+                class="absolute inset-x-2 bottom-full z-20 mb-1 overflow-hidden rounded-md border border-border-weak-base bg-surface-raised-base"
+                style={{ "max-height": "200px", "overflow-y": "auto" }}
+                role="listbox"
+              >
+                <For each={suggestions()}>
+                  {(p, i) => (
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={i() === highlightIdx()}
+                      onMouseDown={(e) => {
+                        // mousedown not click — click would fire after blur
+                        e.preventDefault()
+                        insertSuggestion(p)
+                      }}
+                      onMouseEnter={() => setHighlightIdx(i())}
+                      classList={{
+                        "flex w-full min-h-7 items-center gap-2 px-2 py-1 text-left text-12-regular transition-colors duration-150 ease-out motion-reduce:transition-none":
+                          true,
+                        "bg-collab-accent-soft text-collab-accent": i() === highlightIdx(),
+                        "text-text-base hover:bg-surface-base-hover": i() !== highlightIdx(),
+                      }}
+                    >
+                      <img
+                        src={p.githubAvatarUrl || `https://github.com/${p.githubLogin}.png?size=24`}
+                        alt=""
+                        class="size-4 rounded-full"
+                      />
+                      <span class="font-mono text-[11px]">@{p.githubLogin}</span>
+                      <Show when={p.isOnline}>
+                        <span class="ml-auto size-1.5 rounded-full bg-surface-success-strong" title="Online" />
+                      </Show>
+                    </button>
+                  )}
+                </For>
+              </div>
             </Show>
-          </Show>
-        </div>
-      </Show>
-    </div>
+
+            <Show when={error()}>
+              <p class="pt-1 text-[11px] text-text-on-critical-base">{error()}</p>
+            </Show>
+          </div>
+        </Show>
+      </aside>
+    </Show>
   )
 }
 
-function NotesFeed(props: { notes: CollabNote[]; tick: number }) {
+function NotesFeed(props: { groups: Array<{ key: string; label: string; notes: CollabNote[] }> }) {
   let scroller: HTMLDivElement | undefined
   // After every render, auto-scroll to the bottom IF the user was already at
   // (or within 40 px of) the bottom — preserves position when reading older
   // messages.
   let lastCount = 0
+  const total = () => props.groups.reduce((sum, g) => sum + g.notes.length, 0)
   const onAfter = () => {
     if (!scroller) return
     const wasAtBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 40
-    if (props.notes.length !== lastCount && (wasAtBottom || lastCount === 0)) {
+    if (total() !== lastCount && (wasAtBottom || lastCount === 0)) {
       scroller.scrollTop = scroller.scrollHeight
     }
-    lastCount = props.notes.length
+    lastCount = total()
   }
+  createEffect(() => {
+    total()
+    queueMicrotask(onAfter)
+  })
+  onCleanup(() => (scroller = undefined))
 
   return (
-    <Show
-      when={props.notes.length > 0}
-      fallback={
-        <div class="text-[11px] text-zinc-600 italic px-1">No team messages yet.</div>
-      }
+    <div
+      ref={(el) => (scroller = el)}
+      class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2"
     >
-      <div
-        ref={(el) => {
-          scroller = el
-          queueMicrotask(onAfter)
-        }}
-        class="max-h-[40vh] overflow-y-auto overscroll-contain space-y-1.5 pr-1"
+      <Show
+        when={props.groups.length > 0}
+        fallback={
+          <p class="rounded-md border border-dashed border-border-weak-base px-3 py-6 text-center text-12-regular text-text-base">
+            No team messages yet.
+          </p>
+        }
       >
-        <For each={props.notes}>
-          {(n) => {
-            // Touch tick to re-render relative timestamps periodically.
-            props.tick
-            return (
-              <div class="flex items-start gap-1.5">
-                <img
-                  src={`https://github.com/${n.authorGithubLogin}.png?size=20`}
-                  alt={n.authorGithubLogin}
-                  class="w-4 h-4 rounded-full flex-shrink-0 mt-0.5"
-                />
-                <div class="min-w-0 flex-1">
-                  <div class="flex items-baseline gap-1.5">
-                    <span class="text-[11px] font-medium text-zinc-300 truncate">{n.authorGithubLogin}</span>
-                    <span class="text-[9px] text-zinc-600">{relativeTime(n.createdAt)}</span>
-                  </div>
-                  <div class="text-[11px] text-zinc-400 whitespace-pre-wrap break-words leading-snug">
-                    {renderMentions(n.content)}
-                  </div>
-                </div>
+        <For each={props.groups}>
+          {(group) => (
+            <section>
+              <div class="sticky top-0 z-10 -mx-3 bg-surface-base px-3 py-1">
+                <span class="font-mono text-[10px] uppercase tracking-[0.06em] text-text-base">{group.label}</span>
               </div>
-            )
-          }}
+              <For each={group.notes}>
+                {(n) => {
+                  const at = () => (n.createdAt instanceof Date ? n.createdAt : new Date(n.createdAt as unknown as string))
+                  return (
+                    <article class="flex items-start gap-2 py-1">
+                      <img
+                        src={`https://github.com/${n.authorGithubLogin}.png?size=24`}
+                        alt=""
+                        class="mt-0.5 size-5 shrink-0 rounded-full"
+                      />
+                      <div class="min-w-0 flex-1">
+                        <div class="flex items-baseline gap-1.5">
+                          <span class="truncate text-12-medium text-text-strong">{n.authorGithubLogin}</span>
+                          <span class="ml-auto shrink-0 font-mono text-[10px] text-text-base">{clockTime(at())}</span>
+                        </div>
+                        <p class="text-12-regular text-text-base break-words whitespace-pre-wrap">
+                          {renderMentions(n.content)}
+                        </p>
+                      </div>
+                    </article>
+                  )
+                }}
+              </For>
+            </section>
+          )}
         </For>
-      </div>
-    </Show>
+      </Show>
+    </div>
+  )
+}
+
+function ChevronRight() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" class="size-4">
+      <path d="M7.5 4.5 13 10l-5.5 5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
+  )
+}
+
+function ChevronLeft() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" class="size-4">
+      <path d="M12.5 4.5 7 10l5.5 5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+    </svg>
   )
 }
