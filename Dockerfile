@@ -35,6 +35,7 @@ RUN find . -type f \
       ! -name '.npmrc' \
       ! -name 'bunfig.toml' \
       ! -path './patches/*' \
+      ! -path '*/vendor/*.tgz' \
       -delete && \
     find . -type d -empty -delete
 
