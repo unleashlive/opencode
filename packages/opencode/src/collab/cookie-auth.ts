@@ -99,7 +99,7 @@ export function lookupCookieIdentity(req: Request): CookieIdentity | null {
       .where(eq(CollabAuthSessionTable.token, sid))
       .get()
     if (!row) return null
-    if (row.expires_at < Date.now()) {
+    if (row.expires_at.getTime() < Date.now()) {
       db.delete(CollabAuthSessionTable).where(eq(CollabAuthSessionTable.token, sid)).run()
       return null
     }
@@ -119,7 +119,7 @@ export function lookupCookieIdentityFromHeaders(cookieHeader: string): CookieIde
       .where(eq(CollabAuthSessionTable.token, sid))
       .get()
     if (!row) return null
-    if (row.expires_at < Date.now()) {
+    if (row.expires_at.getTime() < Date.now()) {
       db.delete(CollabAuthSessionTable).where(eq(CollabAuthSessionTable.token, sid)).run()
       return null
     }

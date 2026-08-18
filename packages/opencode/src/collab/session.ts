@@ -69,7 +69,7 @@ export function createCollabSession(input: CreateCollabSessionInput): CollabSess
       queue_mode: input.queueMode ?? "fifo",
       session_id: null,
       branch,
-      created_at: now,
+      created_at: new Date(now),
       deleted_at: null,
     }).run()
 
@@ -80,7 +80,7 @@ export function createCollabSession(input: CreateCollabSessionInput): CollabSess
       github_avatar_url: input.ownerAvatarUrl,
       role: "driver" as CollabRole,
       is_online: false,
-      joined_at: now,
+      joined_at: new Date(now),
     }).run()
 
     if (input.repos.length > 0) {
@@ -135,9 +135,9 @@ export function getCollabSession(id: string): CollabSession | null {
         githubAvatarUrl: p.github_avatar_url,
         role: p.role,
         isOnline: Boolean(p.is_online),
-        joinedAt: new Date(p.joined_at),
+        joinedAt: p.joined_at,
       })),
-      createdAt: new Date(session.created_at),
+      createdAt: session.created_at,
       deletedAt: session.deleted_at ? new Date(session.deleted_at) : null,
       initStatus: (session.init_status ?? "ready") as "pending" | "ready" | "failed",
       initError: session.init_error ?? null,
@@ -359,7 +359,7 @@ export function addRepos(collabSessionId: string, repos: string[]): string[] {
 export function deleteCollabSession(id: string): void {
   Database.use((db) => {
     db.update(CollabSessionTable)
-      .set({ deleted_at: Date.now() })
+      .set({ deleted_at: new Date() })
       .where(eq(CollabSessionTable.id, id))
       .run()
   })

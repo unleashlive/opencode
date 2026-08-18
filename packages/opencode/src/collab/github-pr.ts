@@ -242,7 +242,7 @@ export async function openPullRequestForRepo(
           commitCount,
           additions,
           deletions,
-          data.html_url,
+          data.html_url ?? null,
           Date.now(),
         )
     })

@@ -1,19 +1,16 @@
 import { type SQLiteBunDatabase } from "drizzle-orm/bun-sqlite"
 import { migrate } from "drizzle-orm/bun-sqlite/migrator"
-import { type SQLiteTransaction } from "drizzle-orm/sqlite-core"
 export * from "drizzle-orm"
-import { RuntimeFlags } from "@/effect/runtime-flags"
 import { LocalContext } from "@/util/local-context"
 import { Global } from "@opencode-ai/core/global"
-import * as Log from "@opencode-ai/core/util/log"
 import { NamedError } from "@opencode-ai/core/util/error"
 import path from "path"
 import { readFileSync, readdirSync, existsSync } from "fs"
+import type { Database as BunDatabase } from "bun:sqlite"
 import { Flag } from "@opencode-ai/core/flag/flag"
-import { InstallationChannel } from "@opencode-ai/core/installation/version"
 import { EffectBridge } from "@/effect/bridge"
 import { init } from "#db"
-import { Effect, Schema } from "effect"
+import { Schema } from "effect"
 
 declare const OPENCODE_MIGRATIONS: { sql: string; timestamp: number; name: string }[] | undefined
 
@@ -21,31 +18,17 @@ export const NotFoundError = NamedError.create("NotFoundError", {
   message: Schema.String,
 })
 
-const log = Log.create({ service: "db" })
-
-type DatabaseFlags = Pick<RuntimeFlags.Info, "disableChannelDb" | "skipMigrations">
-
-const readRuntimeFlags = () =>
-  Effect.runSync(RuntimeFlags.Service.useSync((flags) => flags).pipe(Effect.provide(RuntimeFlags.defaultLayer)))
-
-export function getChannelPath(flags: Pick<DatabaseFlags, "disableChannelDb"> = readRuntimeFlags()) {
-  if (["latest", "beta", "prod"].includes(InstallationChannel) || flags.disableChannelDb)
-    return path.join(Global.Path.data, "opencode.db")
-  const safe = InstallationChannel.replace(/[^a-zA-Z0-9._-]/g, "-")
-  return path.join(Global.Path.data, `opencode-${safe}.db`)
+const log = {
+  info: (msg: string, meta?: unknown) => console.info("[db]", msg, meta ?? ""),
 }
 
-export const getPath = (flags?: Pick<DatabaseFlags, "disableChannelDb">) => {
+export function getPath(): string {
   if (Flag.OPENCODE_DB) {
     if (Flag.OPENCODE_DB === ":memory:" || path.isAbsolute(Flag.OPENCODE_DB)) return Flag.OPENCODE_DB
     return path.join(Global.Path.data, Flag.OPENCODE_DB)
   }
-  return getChannelPath(flags)
+  return path.join(Global.Path.data, "opencode.db")
 }
-
-export type Transaction = SQLiteTransaction<"sync", void>
-
-type Client = ReturnType<typeof init>
 
 type Journal = { sql: string; timestamp: number; name: string }[]
 
@@ -89,14 +72,18 @@ function migrations(dir: string): Journal {
   return sql.sort((a, b) => a.timestamp - b.timestamp)
 }
 
-let client: Client | undefined
+// Drizzle 1.0.0-rc.2 moved $client to private; re-expose it as public so
+// collab code can access the underlying bun:sqlite handle directly.
+export type TxOrDb = ReturnType<typeof init> & { readonly $client: BunDatabase }
+
+let client: TxOrDb | undefined
 let loaded = false
 
 export const Client = Object.assign(
-  (flags: DatabaseFlags = readRuntimeFlags()): Client => {
-    if (loaded) return client as Client
+  (): TxOrDb => {
+    if (loaded) return client as TxOrDb
 
-    const dbPath = getPath(flags)
+    const dbPath = getPath()
     log.info("opening database", { path: dbPath })
 
     const db = init(dbPath)
@@ -118,17 +105,12 @@ export const Client = Object.assign(
         count: entries.length,
         mode: typeof OPENCODE_MIGRATIONS !== "undefined" ? "bundled" : "dev",
       })
-      if (flags.skipMigrations) {
-        for (const item of entries) {
-          item.sql = "select 1;"
-        }
-      }
       applyMigrations(db, entries)
     }
 
-    client = db
+    client = db as TxOrDb
     loaded = true
-    return db
+    return client
   },
   {
     reset: () => {
@@ -144,8 +126,6 @@ export function close() {
   Client().$client.close()
   Client.reset()
 }
-
-export type TxOrDb = Transaction | Client
 
 const ctx = LocalContext.create<{
   tx: TxOrDb
@@ -188,7 +168,7 @@ export function transaction<T>(
   } catch (err) {
     if (err instanceof LocalContext.NotFound) {
       const effects: (() => void | Promise<void>)[] = []
-      const txCallback = EffectBridge.bind((tx: TxOrDb) => ctx.provide({ tx, effects }, () => callback(tx)))
+      const txCallback = EffectBridge.bind((tx: any) => ctx.provide({ tx, effects }, () => callback(tx as TxOrDb)))
       const result = Client().transaction(txCallback, { behavior: options?.behavior })
       for (const effect of effects) effect()
       return result as NotPromise<T>

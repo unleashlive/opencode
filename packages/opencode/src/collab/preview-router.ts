@@ -236,7 +236,6 @@ export async function handlePreviewHttp(req: Request, port: number, rest: string
           ? undefined
           : (req.body as BodyInit | null) ?? undefined,
       // Stream the response back without buffering.
-      // @ts-expect-error — Bun supports this option even though node fetch typing omits it.
       redirect: "manual",
       // Bun-specific: when scheme === "https" the dev server's cert is
       // a self-signed in-container blob (e.g. ssl/cert.pem from the repo).
@@ -245,7 +244,6 @@ export async function handlePreviewHttp(req: Request, port: number, rest: string
       // For scheme === "http" this option is a harmless no-op.
       // Future fallback if Bun ever drops this init field: node:https
       // `https.request()` with `rejectUnauthorized: false` in agent options.
-      // @ts-expect-error — Bun-only fetch init field, not in standard typings.
       tls: { rejectUnauthorized: false },
     })
 

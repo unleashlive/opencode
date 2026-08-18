@@ -16,7 +16,7 @@ export function addParticipant(
         github_avatar_url: participant.githubAvatarUrl,
         role: participant.role,
         is_online: false,
-        joined_at: now,
+        joined_at: new Date(now),
       })
       .onConflictDoUpdate({
         target: [CollabParticipantTable.collab_session_id, CollabParticipantTable.github_id],
@@ -96,7 +96,7 @@ export function getParticipant(collabSessionId: string, githubId: number): Parti
       githubAvatarUrl: row.github_avatar_url,
       role: row.role,
       isOnline: Boolean(row.is_online),
-      joinedAt: new Date(row.joined_at),
+      joinedAt: row.joined_at,
     }
   })
 }

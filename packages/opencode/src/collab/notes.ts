@@ -34,7 +34,7 @@ export function insertNote(input: {
         author_github_id: input.authorGithubId,
         author_github_login: input.authorGithubLogin,
         content: input.content,
-        created_at: now,
+        created_at: new Date(now),
       })
       .run()
   })
@@ -80,7 +80,7 @@ export function listRecentNotes(collabSessionId: string, limit = 100): CollabNot
       authorGithubId: r.author_github_id,
       authorGithubLogin: r.author_github_login,
       content: r.content,
-      createdAt: new Date(r.created_at),
+      createdAt: r.created_at,
     }))
   })
 }

@@ -671,7 +671,7 @@ function getSession(req: Request): CookieSession | null {
       .get()
     if (!row) return null
     // Reject expired sessions
-    if (row.expires_at < Date.now()) {
+    if (row.expires_at.getTime() < Date.now()) {
       db.delete(CollabAuthSessionTable).where(eq(CollabAuthSessionTable.token, sid)).run()
       return null
     }
@@ -723,8 +723,8 @@ function setSession(session: CookieSession): { token: string; header: string } {
       github_login: session.githubLogin,
       github_avatar_url: session.githubAvatarUrl,
       github_access_token: encryptedAccessToken,
-      created_at: now,
-      expires_at: expiresAt,
+      created_at: new Date(now),
+      expires_at: new Date(expiresAt),
     }).run()
   })
   // Scope the cookie to the collab subdomain tree so the dedicated preview
@@ -2062,7 +2062,7 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
       text: body.content,
       collabSession,
       authorLogin: sess.githubLogin,
-      suggestionId: suggestion.id,
+      context: { kind: "suggestion", suggestionId: suggestion.id },
     })) {
       broadcastSse(sessionId, event)
     }
@@ -2096,7 +2096,7 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
       text: body.content,
       collabSession,
       authorLogin: sess.githubLogin,
-      suggestionId: suggestion.id,
+      context: { kind: "suggestion", suggestionId: suggestion.id },
     })) {
       broadcastSse(sessionId, event)
     }

@@ -23,7 +23,7 @@ function rowToSuggestion(
     voteScore: row.vote_score,
     votes,
     reactions: Object.keys(reactions).length > 0 ? reactions : undefined,
-    createdAt: new Date(row.created_at),
+    createdAt: row.created_at,
     model: row.model ?? undefined,
     agent: row.agent ?? undefined,
     variant: row.variant ?? undefined,
@@ -79,7 +79,7 @@ export const collabDb: CollabDB = {
           content: params.content,
           status: params.status,
           vote_score: 0,
-          created_at: params.createdAt,
+          created_at: new Date(params.createdAt),
           model: params.model ?? null,
           agent: params.agent ?? null,
           variant: params.variant ?? null,
@@ -103,7 +103,7 @@ export const collabDb: CollabDB = {
             id: collabId("vt"),
             suggestion_id: suggestionId,
             voter_github_login: "__system__", // overridden by caller passing voterLogin separately
-            created_at: Date.now(),
+            created_at: new Date(),
           })
           .run()
       } catch {

@@ -1,8 +1,11 @@
 <!doctype html>
-<html lang="en" style="background-color: var(--background-base)">
+<html lang="en" style="background-color: var(--v2-background-bg-deep, #fafafa)">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, interactive-widget=resizes-content, viewport-fit=cover"
+    />
     <title>Unleash Collab</title>
     <link rel="icon" type="image/svg+xml" href="/unleash-mark.svg" />
     <link rel="icon" type="image/png" href="/favicon-32x32.png?v=2" sizes="32x32" />
@@ -27,9 +30,9 @@
     <meta name="twitter:image" content="https://collab.utils.unleashlive.com/og.png?v=2" />
     <script id="oc-theme-preload-script" src="/oc-theme-preload.js"></script>
   </head>
-  <body class="antialiased overscroll-none text-12-regular overflow-hidden">
+  <body class="antialiased overscroll-none text-12-regular overflow-hidden bg-v2-background-bg-deep">
     <noscript>You need to enable JavaScript to run this app.</noscript>
-    <div id="root" class="flex flex-col h-dvh p-px"></div>
+    <div id="root" class="flex flex-col h-dvh bg-v2-background-bg-deep p-px"></div>
     <script src="/src/entry.tsx" type="module"></script>
   </body>
 </html>
