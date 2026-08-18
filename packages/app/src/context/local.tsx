@@ -270,7 +270,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       if (!explicit) return undefined
       if (models.find(explicit)) return undefined
       // model exists in the catalog but provider isn't connected
-      if (providers.all().find((p) => p.id === explicit.providerID)) return explicit.providerID
+      if (providers.all().has(explicit.providerID)) return explicit.providerID
       return undefined
     })
 

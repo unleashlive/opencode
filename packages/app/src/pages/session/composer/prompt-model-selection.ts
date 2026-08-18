@@ -55,6 +55,7 @@ export function createPromptModelSelection(input: { agent: () => { model?: Model
     current,
     recent: recentModels,
     list: models.list,
+    disconnectedProvider: (() => undefined) as () => string | undefined,
     cycle(direction: 1 | -1) {
       const items = recentModels()
       const item = current()

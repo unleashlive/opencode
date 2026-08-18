@@ -1326,16 +1326,16 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
 
     // Snapshot any uploaded images BEFORE clearing the editor.  The collab
     // server forwards these to the native session as `file` parts so the LLM
-    // actually sees the image (jpg/png/…).  `dataUrl` is a base64 data: URL.
+    // actually sees the image (jpg/png/…).  `blob.url` is a base64 data: URL.
     const attachments = imageAttachments().map((a) => ({
       mime: a.mime,
-      url: a.dataUrl,
+      url: a.blob.url,
       filename: a.filename,
     }))
     try {
-      const currentModel = local.model.current()
-      const currentAgent = local.agent.current()
-      const currentVariant = local.model.variant.current()
+      const currentModel = props.controls.model.selection.current()
+      const currentAgent = props.controls.agents.current
+      const currentVariant = props.controls.model.selection.variant.current()
       // "providerID/modelID" string that the collab server parses back into
       // the { providerID, modelID } object for prompt_async.
       const modelStr = currentModel ? `${currentModel.provider.id}/${currentModel.id}` : undefined
@@ -1344,7 +1344,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
           type: "opencode:collab-prompt-submit",
           content: text,
           model: modelStr,
-          agent: currentAgent?.name,
+          agent: currentAgent,
           variant: currentVariant,
           attachments,
         },
@@ -1828,7 +1828,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       data-component="prompt-model-control"
                       classList={{ "animate-in fade-in duration-300": providersShouldFadeIn() }}
                     >
-                      <Show when={local.model.disconnectedProvider()}>
+                      <Show when={props.controls.model.selection.disconnectedProvider()}>
                         {(providerID) => (
                           <TooltipKeybind
                             placement="top"
@@ -1844,7 +1844,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                               class="min-w-0 max-w-[320px] text-13-regular text-text-on-warning-base group"
                               onClick={() => {
                                 void import("@/components/dialog-connect-provider").then((x) => {
-                                  dialog.show(() => <x.DialogConnectProvider provider={providerID()} />)
+                                  dialog.show(() => (
+                                    <x.DialogConnectProvider
+                                      controller={{ selected: () => providerID(), select: () => {}, back: () => {} }}
+                                    />
+                                  ))
                                 })
                               }}
                             >
@@ -1855,7 +1859,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                           </TooltipKeybind>
                         )}
                       </Show>
-                      <Show when={!local.model.disconnectedProvider()}>
+                      <Show when={!props.controls.model.selection.disconnectedProvider()}>
                       <Show
                         when={props.controls.model.paid}
                         fallback={
