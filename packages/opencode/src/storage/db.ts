@@ -8,6 +8,7 @@ import path from "path"
 import { readFileSync, readdirSync, existsSync } from "fs"
 import type { Database as BunDatabase } from "bun:sqlite"
 import { Flag } from "@opencode-ai/core/flag/flag"
+import { InstallationChannel } from "@opencode-ai/core/installation/version"
 import { EffectBridge } from "@/effect/bridge"
 import { init } from "#db"
 import { Schema } from "effect"
@@ -27,7 +28,18 @@ export function getPath(): string {
     if (Flag.OPENCODE_DB === ":memory:" || path.isAbsolute(Flag.OPENCODE_DB)) return Flag.OPENCODE_DB
     return path.join(Global.Path.data, Flag.OPENCODE_DB)
   }
-  return path.join(Global.Path.data, "opencode.db")
+  // Mirror the channel-aware path that packages/core/src/database/database.ts
+  // uses so both systems open the same SQLite file.  Pre-PR72, db.ts already
+  // did this via getChannelPath; losing the suffix caused ECS deployments to
+  // open a fresh opencode.db while the production data lived in opencode-local.db.
+  if (
+    ["latest", "beta", "prod"].includes(InstallationChannel) ||
+    process.env["OPENCODE_DISABLE_CHANNEL_DB"] === "1" ||
+    process.env["OPENCODE_DISABLE_CHANNEL_DB"] === "true"
+  )
+    return path.join(Global.Path.data, "opencode.db")
+  const safe = InstallationChannel.replace(/[^a-zA-Z0-9._-]/g, "-")
+  return path.join(Global.Path.data, `opencode-${safe}.db`)
 }
 
 type Journal = { sql: string; timestamp: number; name: string }[]
