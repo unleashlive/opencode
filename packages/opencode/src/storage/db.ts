@@ -105,6 +105,45 @@ export const Client = Object.assign(
         count: entries.length,
         mode: typeof OPENCODE_MIGRATIONS !== "undefined" ? "bundled" : "dev",
       })
+      // Drizzle beta.19 (used before the upstream sync to rc.2) tracked applied
+      // migrations in a "migration" table with column "id" = folder name.
+      // rc.2 switched to "__drizzle_migrations" with a "name" column.  On an
+      // existing EFS database the old table is present but the new one is not,
+      // so rc.2 sees all migrations as unapplied and tries to re-run them —
+      // which then crashes because the schema columns already exist.
+      // Fix: seed "__drizzle_migrations" from the legacy "migration" table
+      // before handing off to applyMigrations so rc.2 skips already-done work.
+      const hasLegacyTable = (db as unknown as TxOrDb).$client
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='migration'")
+        .get()
+      if (hasLegacyTable) {
+        const oldRows = (db as unknown as TxOrDb).$client
+          .prepare("SELECT id FROM migration")
+          .all() as Array<{ id: string }>
+        const oldNames = new Set(oldRows.map((r) => r.id));
+        (db as unknown as TxOrDb).$client.exec(`
+          CREATE TABLE IF NOT EXISTS "__drizzle_migrations" (
+            id INTEGER PRIMARY KEY,
+            hash text NOT NULL,
+            created_at numeric,
+            name text,
+            applied_at TEXT
+          )
+        `)
+        const insert = (db as unknown as TxOrDb).$client.prepare(
+          `INSERT OR IGNORE INTO "__drizzle_migrations" (hash, created_at, name, applied_at) VALUES (?, ?, ?, ?)`,
+        )
+        const now = Date.now()
+        let seeded = 0
+        for (const entry of entries) {
+          if (oldNames.has(entry.name)) {
+            insert.run("legacy", now, entry.name, new Date().toISOString())
+            seeded++
+          }
+        }
+        if (seeded > 0)
+          log.info("seeded legacy migration records into __drizzle_migrations", { count: seeded })
+      }
       applyMigrations(db, entries)
     }
 
