@@ -21,6 +21,32 @@
   --collab-accent-ink: #ffffff;
   --collab-accent-soft: color-mix(in srgb, var(--collab-accent) 10%, transparent);
   --collab-accent-line: color-mix(in srgb, var(--collab-accent) 35%, transparent);
+
+  /*
+   * Neon primary / success gradients — restored per product feedback: the
+   * ENG-1 uplift's monochrome host button (near-black/near-white) read as too
+   * quiet for the app's two "hero" actions. This brings back the pre-uplift
+   * blue→violet primary and emerald→green success treatment, rebuilt on this
+   * file's token mechanic instead of the old raw hex + stock-Tailwind-palette
+   * gradient utilities (`from-blue-600 via-indigo-600 to-violet-600`, which
+   * required re-injecting the full numeric palette ENG-1 deliberately
+   * removed). One recolour point per mode, still zero raw hex at any call
+   * site — see .collab-btn-primary / .collab-btn-success below and BTN_PRIMARY
+   * / BTN_SUCCESS in ./ui.ts.
+   *
+   * Scope is deliberate: only the single primary CTA per view and the
+   * positive/live action (Launch preview) get the gradient treatment, per the
+   * "one primary action per view, everything else quiet" rule the uplift set
+   * — a wash of colour on every button would fight that rule, not restore it.
+   */
+  --collab-primary-from: #3a6cff;
+  --collab-primary-via: #6d5bf6;
+  --collab-primary-to: #9b4de0;
+  --collab-primary-glow: color-mix(in srgb, var(--collab-primary-via) 45%, transparent);
+
+  --collab-success-from: #12c905;
+  --collab-success-to: #34d399;
+  --collab-success-glow: color-mix(in srgb, var(--collab-success-from) 40%, transparent);
 }
 
 html[data-color-scheme="dark"] {
@@ -28,4 +54,94 @@ html[data-color-scheme="dark"] {
   --collab-accent-ink: #14162b;
   --collab-accent-soft: color-mix(in srgb, var(--collab-accent) 14%, transparent);
   --collab-accent-line: color-mix(in srgb, var(--collab-accent) 40%, transparent);
+
+  --collab-primary-from: #5b86ff;
+  --collab-primary-via: #8a72ff;
+  --collab-primary-to: #b45cf0;
+  --collab-primary-glow: color-mix(in srgb, var(--collab-primary-via) 55%, transparent);
+
+  --collab-success-from: #12c905;
+  --collab-success-to: #4fe38a;
+  --collab-success-glow: color-mix(in srgb, var(--collab-success-from) 50%, transparent);
+}
+
+/*
+ * Gradient fill + glow shadow for BTN_PRIMARY / BTN_SUCCESS. Structure (size,
+ * border-radius, focus ring, disabled cursor) stays owned by BTN_BASE in
+ * ./ui.ts; these two classes own only fill, ink and the hover/active motion —
+ * additive, so BTN_BASE's focus-visible ring and motion-reduce guard still
+ * apply untouched.
+ */
+.collab-btn-primary,
+.collab-btn-success {
+  color: #ffffff;
+  border-color: transparent;
+  transition:
+    filter 150ms ease-out,
+    box-shadow 150ms ease-out,
+    transform 150ms ease-out;
+}
+
+.collab-btn-primary {
+  background-image: linear-gradient(
+    to right,
+    var(--collab-primary-from),
+    var(--collab-primary-via),
+    var(--collab-primary-to)
+  );
+  box-shadow: 0 2px 10px var(--collab-primary-glow);
+}
+
+.collab-btn-success {
+  background-image: linear-gradient(to right, var(--collab-success-from), var(--collab-success-to));
+  box-shadow: 0 2px 10px var(--collab-success-glow);
+}
+
+.collab-btn-primary:hover,
+.collab-btn-success:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.collab-btn-primary:active,
+.collab-btn-success:active {
+  filter: brightness(0.96);
+  transform: translateY(0);
+}
+
+.collab-btn-primary:disabled,
+.collab-btn-success:disabled {
+  background-image: none;
+  background-color: var(--surface-inset-base);
+  box-shadow: none;
+  filter: none;
+  transform: none;
+  color: var(--text-weak);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .collab-btn-primary,
+  .collab-btn-success {
+    transition: none;
+  }
+  .collab-btn-primary:hover,
+  .collab-btn-success:hover,
+  .collab-btn-primary:active,
+  .collab-btn-success:active {
+    transform: none;
+  }
+}
+
+/*
+ * Role accent text — driver (amber, "in control") / contributor (blue,
+ * "proposing"). Viewer stays on the neutral host token (no accent = no
+ * special standing). Restored from the pre-uplift roleColor() helper.
+ * --icon-warning-base already has its own light/dark values in theme.css,
+ * so no separate dark override is needed here.
+ */
+.collab-role-driver {
+  color: var(--icon-warning-base);
+}
+.collab-role-contributor {
+  color: var(--collab-accent);
 }

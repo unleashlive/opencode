@@ -15,7 +15,7 @@
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js"
 import { useCollab } from "@/context/collab"
 import type { CollabRole } from "@opencode-ai/collab"
-import { BTN_GHOST, BTN_ICON, CHIP } from "./ui"
+import { BTN_GHOST, BTN_ICON, CHIP, ROLE_TEXT_CLASS } from "./ui"
 import { BrandMark } from "./BrandMark"
 import { ThemeToggle } from "./ThemeToggle"
 
@@ -143,7 +143,7 @@ export function SessionTopBar(props: {
           {onlineCount()}/{participants().length} online
         </span>
 
-        <span class={`${CHIP} hidden lg:inline-flex`} title="Your role in this session">
+        <span class={`${CHIP} ${ROLE_TEXT_CLASS[props.myRole]} hidden lg:inline-flex`} title="Your role in this session">
           {props.myRole}
         </span>
 

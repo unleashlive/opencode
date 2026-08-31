@@ -30,7 +30,7 @@ import { createMemo, createSignal, Show, For, type Accessor } from "solid-js"
 import { Spinner } from "@opencode-ai/ui/spinner"
 import { useCollab, type PreviewStateSnapshot, type PreviewHolder } from "@/context/collab"
 import type { AvailablePreview } from "@opencode-ai/collab"
-import { BTN_PRIMARY, BTN_GHOST } from "./ui"
+import { BTN_SUCCESS, BTN_GHOST } from "./ui"
 
 export interface PreviewController {
   available: Accessor<AvailablePreview | null>
@@ -114,7 +114,7 @@ export function PreviewPrimaryAction(props: { ctl: PreviewController }) {
         onClick={ctl.launch}
         disabled={ctl.busy() || !ctl.isDriver()}
         title={ctl.isDriver() ? `Start ${ctl.available()!.label}` : "Drivers only"}
-        class={`${BTN_PRIMARY} h-7 px-2.5`}
+        class={`${BTN_SUCCESS} h-7 px-2.5`}
       >
         <Show when={!ctl.busy()} fallback={<Spinner class="size-3.5" />}>
           <span class="size-1.5 rounded-full bg-current" aria-hidden="true" />

@@ -19,7 +19,7 @@ import { createMemo, createSignal, For, Show } from "solid-js"
 import { useCollab } from "@/context/collab"
 import type { CollabRole, Participant } from "@opencode-ai/collab"
 import { CollabDialog, ConfirmDialog } from "./CollabDialog"
-import { BTN_ICON_CRITICAL, CHIP, FIELD } from "./ui"
+import { BTN_ICON_CRITICAL, CHIP, FIELD, ROLE_TEXT_CLASS } from "./ui"
 
 const ROLE_LABELS: Record<CollabRole, string> = {
   driver: "Driver",
@@ -148,7 +148,14 @@ function ParticipantRow(props: {
         <p class="text-[11px] text-text-weak">{props.participant.isOnline ? "Online" : "Offline"}</p>
       </div>
 
-      <Show when={props.isDriver} fallback={<span class={CHIP}>{ROLE_LABELS[props.participant.role]}</span>}>
+      <Show
+        when={props.isDriver}
+        fallback={
+          <span class={`${CHIP} ${ROLE_TEXT_CLASS[props.participant.role]}`}>
+            {ROLE_LABELS[props.participant.role]}
+          </span>
+        }
+      >
         <select
           class={`${FIELD} w-[120px] shrink-0`}
           value={props.participant.role}
