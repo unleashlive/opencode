@@ -36,6 +36,7 @@ import { useGlobal } from "@/context/global"
 import { ServerConnection, useServer } from "@/context/server"
 import { tabKey, useTabs } from "@/context/tabs"
 import type { PromptSession } from "@/context/prompt"
+import { isCollabEmbed } from "@/utils/collab-embed"
 import "./titlebar.css"
 import { newTabTooltipKeybind } from "./command-tooltip-keybind"
 import { normalizeSessionInfo } from "@/utils/session"
@@ -311,7 +312,20 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
 
               tabs.newDraft({ server: fallback.server, directory: fallback.project.worktree }, "")
             }
-            const toggleHome = () => tabs.toggleHome({ home: layout.route().type === "home", current: currentTab() })
+            // Inside the collab session iframe (?embed=collab), this titlebar
+            // renders unconditionally alongside the DEV/channel indicator —
+            // but the embedded app's own "home" grid is meaningless there
+            // (there's no multi-project picker to show). Send the user to the
+            // collab landing page instead, navigating the TOP window since
+            // this is running inside an iframe.
+            const toggleHome = () => {
+              if (isCollabEmbed()) {
+                const top = window.top ?? window
+                top.location.href = "/collab/new"
+                return
+              }
+              tabs.toggleHome({ home: layout.route().type === "home", current: currentTab() })
+            }
 
             command.register("titlebar-home", () => [
               {

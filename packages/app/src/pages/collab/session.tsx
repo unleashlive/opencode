@@ -28,6 +28,7 @@ import { InviteDialog } from "@/components/collab/InviteDialog"
 import { AddRepoDialog } from "@/components/collab/AddRepoDialog"
 import { TutorialDialog } from "@/components/collab/TutorialDialog"
 import { McpConfigDialog } from "@/components/collab/McpConfigDialog"
+import { ParticipantsDialog } from "@/components/collab/ParticipantsDialog"
 import { TeamChatRail } from "@/components/collab/TeamNoteComposer"
 import { TimelineRail } from "@/components/collab/TimelineRail"
 import { SessionTopBar } from "@/components/collab/SessionTopBar"
@@ -55,6 +56,7 @@ function CollabSessionInner(props: { me: Me }) {
   const [showTutorial, setShowTutorial] = createSignal(false)
   const [showMcpConfig, setShowMcpConfig] = createSignal(false)
   const [addRepoOpen, setAddRepoOpen] = createSignal(false)
+  const [showParticipants, setShowParticipants] = createSignal(false)
   const [menuOpen, setMenuOpen] = createSignal(false)
   const [submitError, setSubmitError] = createSignal<string | null>(null)
   // Mobile only. Desktop (md+) always shows all three surfaces and ignores this.
@@ -67,7 +69,8 @@ function CollabSessionInner(props: { me: Me }) {
    * Anything floating above the editor has to hide it: an iframe renders in its
    * own composited layer and can paint over an overlay regardless of z-index.
    */
-  const editorObscured = () => showInvite() || addRepoOpen() || showTutorial() || showMcpConfig() || menuOpen()
+  const editorObscured = () =>
+    showInvite() || addRepoOpen() || showTutorial() || showMcpConfig() || showParticipants() || menuOpen()
 
   /**
    * Listen for prompt submissions from inside the opencode iframe.  The
@@ -155,6 +158,7 @@ function CollabSessionInner(props: { me: Me }) {
         onTutorial={() => setShowTutorial(true)}
         onMcpConfig={() => setShowMcpConfig(true)}
         onAddRepo={() => setAddRepoOpen(true)}
+        onManageParticipants={() => setShowParticipants(true)}
       />
 
       <div class="flex min-h-0 flex-1">
@@ -294,6 +298,10 @@ function CollabSessionInner(props: { me: Me }) {
 
       <Show when={showMcpConfig() && myRole() === "driver"}>
         <McpConfigDialog onClose={() => setShowMcpConfig(false)} />
+      </Show>
+
+      <Show when={showParticipants()}>
+        <ParticipantsDialog onClose={() => setShowParticipants(false)} />
       </Show>
     </div>
   )
@@ -616,12 +624,30 @@ function EmptyReposPanel() {
 
 export default function CollabSessionPage() {
   const params = useParams<{ id: string }>()
+
+  // Force a full remount of everything below (the `/collab/me` fetch AND
+  // CollabProvider) whenever the route's :id changes, rather than relying on
+  // every switch path happening to force a hard `window.location.href`
+  // reload. Mirrors the identical per-id-provider pattern in
+  // pages/session.tsx (`<Show when={... ? params.id : undefined} keyed>`).
+  // Without this, an SPA-internal transition between two already-visited
+  // `/collab/:id` URLs (e.g. browser back/forward) would leave CollabProvider
+  // mounted and let its onMount-hydrated, append-only signals (queue, notes,
+  // promptLog, activityLog) leak state from the old session into the new one.
+  return (
+    <Show when={params.id} keyed>
+      {(id) => <CollabSessionPageBody id={id} />}
+    </Show>
+  )
+}
+
+function CollabSessionPageBody(props: { id: string }) {
   const [me, setMe] = createSignal<Me | null>(null)
 
   onMount(async () => {
     const res = await fetch("/collab/me")
     if (res.status === 401) {
-      window.location.href = `/collab/auth/github?next=/collab/${params.id}`
+      window.location.href = `/collab/auth/github?next=/collab/${props.id}`
       return
     }
     setMe(await res.json())
@@ -640,7 +666,7 @@ export default function CollabSessionPage() {
       }
     >
       {(meVal) => (
-        <CollabProvider collabSessionId={params.id} meGithubId={meVal().githubId}>
+        <CollabProvider collabSessionId={props.id} meGithubId={meVal().githubId}>
           <CollabSessionInner me={meVal()} />
         </CollabProvider>
       )}

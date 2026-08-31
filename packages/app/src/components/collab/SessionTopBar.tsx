@@ -34,6 +34,7 @@ export function SessionTopBar(props: {
   onTutorial: () => void
   onMcpConfig: () => void
   onAddRepo: () => void
+  onManageParticipants: () => void
 }) {
   const collab = useCollab()
 
@@ -110,7 +111,13 @@ export function SessionTopBar(props: {
       </Show>
 
       <div class="ml-auto flex shrink-0 items-center gap-2">
-        <div class="hidden items-center sm:flex" aria-label={`${onlineCount()} of ${participants().length} participants online`}>
+        <button
+          type="button"
+          onClick={props.onManageParticipants}
+          title="View participants"
+          aria-label={`View participants — ${onlineCount()} of ${participants().length} online`}
+          class="hidden items-center rounded-full outline-none transition-opacity duration-150 ease-out hover:opacity-80 focus-visible:ring-2 focus-visible:ring-collab-accent-line sm:flex"
+        >
           <For each={shown()}>
             {(p, i) => (
               <img
@@ -130,7 +137,7 @@ export function SessionTopBar(props: {
               +{overflowCount()}
             </span>
           </Show>
-        </div>
+        </button>
 
         <span class="hidden font-mono text-[10.5px] text-text-weak md:inline">
           {onlineCount()}/{participants().length} online
@@ -153,6 +160,7 @@ export function SessionTopBar(props: {
           onTutorial={props.onTutorial}
           onMcpConfig={props.onMcpConfig}
           onAddRepo={props.onAddRepo}
+          onManageParticipants={props.onManageParticipants}
         />
       </div>
     </header>
@@ -168,6 +176,7 @@ function OverflowMenu(props: {
   onTutorial: () => void
   onMcpConfig: () => void
   onAddRepo: () => void
+  onManageParticipants: () => void
 }) {
   const collab = useCollab()
   const isDriver = () => props.myRole === "driver"
@@ -276,6 +285,12 @@ function OverflowMenu(props: {
           aria-label="Session actions"
           class="absolute right-0 top-full z-50 mt-1 w-56 overflow-hidden rounded-md border border-border-weak-base bg-surface-raised-base py-1"
         >
+          <MenuItem
+            label="Manage participants"
+            hint="View roles, invite, or remove people"
+            onSelect={() => pick(props.onManageParticipants)}
+          />
+
           <Show when={isDriver() && !!collab.session()?.sessionId}>
             <MenuItem
               label={compactState() === "busy" ? "Compacting…" : compactState() === "done" ? "Context compacted" : "Compact context"}
