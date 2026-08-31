@@ -603,7 +603,8 @@ const RECENCY_LABELS: ReadonlyArray<[Recency, string]> = [
   ["earlier", "Earlier"],
 ]
 
-/** Which bucket a session's creation time falls into, relative to `now`. */
+/** Which bucket a session falls into, based on its last prompt activity (not
+ *  creation date) relative to `now`. */
 function recencyOf(at: number, now: number): Recency {
   if (dayKey(at) === dayKey(now)) return "today"
   return now - at < WEEK_MS ? "week" : "earlier"
@@ -623,8 +624,10 @@ function RejoinCard(props: {
 
   const groups = createMemo(() => {
     const byBucket = new Map<Recency, CollabSession[]>()
-    for (const session of [...props.sessions].sort((a, b) => epoch(b.createdAt) - epoch(a.createdAt))) {
-      const bucket = recencyOf(epoch(session.createdAt), now)
+    for (const session of [...props.sessions].sort(
+      (a, b) => epoch(b.lastActivityAt) - epoch(a.lastActivityAt),
+    )) {
+      const bucket = recencyOf(epoch(session.lastActivityAt), now)
       const list = byBucket.get(bucket)
       if (list) list.push(session)
       else byBucket.set(bucket, [session])
@@ -640,6 +643,9 @@ function RejoinCard(props: {
   const defaultOpen = createMemo(() => groups()[0]?.key)
 
   function isOpen(key: Recency): boolean {
+    // "Earlier" always stays expanded — collapsing it hid sessions people
+    // actually wanted to rejoin, defeating the point of the list.
+    if (key === "earlier") return true
     const override = openOverrides()[key]
     return override === undefined ? key === defaultOpen() : override
   }
@@ -666,33 +672,49 @@ function RejoinCard(props: {
             }
           >
             <For each={groups()}>
-              {(group) => (
-                <section class="border-b border-border-weak-base last:border-b-0">
-                  <button
-                    type="button"
-                    onClick={() => setOpenOverrides((prev) => ({ ...prev, [group.key]: !isOpen(group.key) }))}
-                    aria-expanded={isOpen(group.key)}
-                    class="flex min-h-8 w-full items-center gap-1.5 px-3 py-1.5 text-left outline-none transition-colors duration-150 ease-out hover:bg-surface-base-hover focus-visible:ring-2 focus-visible:ring-collab-accent-line motion-reduce:transition-none"
-                  >
-                    <Chevron open={isOpen(group.key)} />
-                    <span class={LABEL_MICRO}>{group.label}</span>
-                    <span class="ml-auto font-mono text-[10.5px] text-text-weak">{group.sessions.length}</span>
-                  </button>
+              {(group) => {
+                // "Earlier" is permanently expanded (see isOpen), so it gets a
+                // static header instead of a toggle button — nothing to click.
+                const alwaysOpen = group.key === "earlier"
+                return (
+                  <section class="border-b border-border-weak-base last:border-b-0">
+                    <Show
+                      when={!alwaysOpen}
+                      fallback={
+                        <div class="flex min-h-8 w-full items-center gap-1.5 px-3 py-1.5">
+                          <Chevron open />
+                          <span class={LABEL_MICRO}>{group.label}</span>
+                          <span class="ml-auto font-mono text-[10.5px] text-text-weak">{group.sessions.length}</span>
+                        </div>
+                      }
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setOpenOverrides((prev) => ({ ...prev, [group.key]: !isOpen(group.key) }))}
+                        aria-expanded={isOpen(group.key)}
+                        class="flex min-h-8 w-full items-center gap-1.5 px-3 py-1.5 text-left outline-none transition-colors duration-150 ease-out hover:bg-surface-base-hover focus-visible:ring-2 focus-visible:ring-collab-accent-line motion-reduce:transition-none"
+                      >
+                        <Chevron open={isOpen(group.key)} />
+                        <span class={LABEL_MICRO}>{group.label}</span>
+                        <span class="ml-auto font-mono text-[10.5px] text-text-weak">{group.sessions.length}</span>
+                      </button>
+                    </Show>
 
-                  <Show when={isOpen(group.key)}>
-                    <For each={group.sessions}>
-                      {(session) => (
-                        <SessionRow
-                          session={session}
-                          canDelete={props.canDelete(session)}
-                          onOpen={() => props.onOpen(session.id)}
-                          onDelete={() => props.onDelete(session)}
-                        />
-                      )}
-                    </For>
-                  </Show>
-                </section>
-              )}
+                    <Show when={isOpen(group.key)}>
+                      <For each={group.sessions}>
+                        {(session) => (
+                          <SessionRow
+                            session={session}
+                            canDelete={props.canDelete(session)}
+                            onOpen={() => props.onOpen(session.id)}
+                            onDelete={() => props.onDelete(session)}
+                          />
+                        )}
+                      </For>
+                    </Show>
+                  </section>
+                )
+              }}
             </For>
           </Show>
         </Show>
@@ -746,7 +768,7 @@ function SessionRow(props: {
       <div class="min-w-0 flex-1">
         <div class="flex items-center gap-2">
           <span class="min-w-0 flex-1 truncate text-12-medium text-text-strong">{session().name}</span>
-          <span class="shrink-0 font-mono text-[10.5px] text-text-base">{relativeTimeShort(epoch(session().createdAt))}</span>
+          <span class="shrink-0 font-mono text-[10.5px] text-text-base">{relativeTimeShort(epoch(session().lastActivityAt))}</span>
         </div>
         <div class="mt-1 flex flex-wrap items-center gap-1">
           <Show

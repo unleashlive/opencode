@@ -3,6 +3,7 @@ import {
   CollabSessionTable,
   CollabParticipantTable,
   CollabRepoTable,
+  CollabSuggestionTable,
 } from "./schema.sql"
 import { collabId } from "@opencode-ai/collab"
 import type { CollabSession, CollabRole, VisibilityMode, QueueMode } from "@opencode-ai/collab"
@@ -119,6 +120,16 @@ export function getCollabSession(id: string): CollabSession | null {
       .where(eq(CollabRepoTable.collab_session_id, id))
       .all()
 
+    // Last prompt activity, for the "Today / This week / Earlier" recency
+    // grouping on the Rejoin card. Falls back to createdAt for a brand-new
+    // session with no prompts submitted yet.
+    const lastSuggestion = db
+      .select({ at: sql<number | null>`max(${CollabSuggestionTable.created_at})` })
+      .from(CollabSuggestionTable)
+      .where(eq(CollabSuggestionTable.collab_session_id, id))
+      .get()
+    const lastActivityAt = lastSuggestion?.at ? new Date(lastSuggestion.at) : new Date(session.created_at)
+
     return {
       id: session.id,
       name: session.name,
@@ -135,9 +146,10 @@ export function getCollabSession(id: string): CollabSession | null {
         githubAvatarUrl: p.github_avatar_url,
         role: p.role,
         isOnline: Boolean(p.is_online),
-        joinedAt: p.joined_at,
+        joinedAt: new Date(p.joined_at),
       })),
-      createdAt: session.created_at,
+      createdAt: new Date(session.created_at),
+      lastActivityAt,
       deletedAt: session.deleted_at ? new Date(session.deleted_at) : null,
       initStatus: (session.init_status ?? "ready") as "pending" | "ready" | "failed",
       initError: session.init_error ?? null,
