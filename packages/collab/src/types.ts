@@ -63,6 +63,14 @@ export interface CollabSession {
   repoBranches?: Record<string, string>
   participants: Participant[]
   createdAt: Date
+  /**
+   * When this session was last actually used — the newest prompt suggestion's
+   * `createdAt`, falling back to the session's own `createdAt` when no prompt
+   * has been submitted yet. Drives the "Today / This week / Earlier"
+   * recency grouping on the Rejoin card, so a session with recent activity
+   * surfaces near the top even if it was created a while ago.
+   */
+  lastActivityAt: Date
   deletedAt: Date | null
   /**
    * Server-side workspace init state.  See WorkspaceInitStatus.

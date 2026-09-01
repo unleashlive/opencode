@@ -1,14 +1,24 @@
 /**
  * Shared visual language for the Collab UI (ENG-1).
  *
- * Contract: host semantic tokens plus the collab accent, nothing else.
+ * Contract: host semantic tokens plus the collab accent, nothing else — with
+ * one deliberate, scoped exception restored per product feedback: BTN_PRIMARY
+ * and BTN_SUCCESS carry the pre-uplift blue→violet / emerald→green gradient
+ * treatment (see .collab-btn-primary / .collab-btn-success in ./collab.css),
+ * because the monochrome host button read as too quiet for the app's two
+ * "hero" actions. Everything else keeps the ENG-1 rule:
  *   - No stock Tailwind palette classes (zinc / indigo / emerald / blue / …).
- *   - No raw hex, no rgba, no gradients, no coloured shadows, no hover lift.
+ *   - No raw hex, no rgba at the call site — colour lives in ./collab.css,
+ *     one recolour point per mode.
  *   - Surfaces, text, borders and success / warning / critical intents come
  *     from packages/ui/src/styles/theme.css via the Tailwind bridge in
  *     packages/ui/src/styles/tailwind/colors.css.
- *   - The only colour Collab owns is --collab-accent-*, declared in
- *     ./collab.css and bridged to utilities in packages/app/src/index.css.
+ *   - The only colour Collab owns is --collab-accent-* / --collab-primary-* /
+ *     --collab-success-*, declared in ./collab.css.
+ *
+ * "One primary action per view, everything else quiet" still holds — the
+ * gradient treatment is intentionally limited to BTN_PRIMARY and BTN_SUCCESS,
+ * not applied to every button, so it reads as emphasis rather than noise.
  *
  * Every interactive recipe carries a focus-visible ring (never a bare
  * outline-none) and a motion-reduce guard.
@@ -26,15 +36,11 @@ export const BTN_BASE =
   "disabled:cursor-not-allowed"
 
 /**
- * The one primary action per view: the host's own quiet solid button.
- * --button-primary-base is near-black in light and near-white in dark, with
- * --icon-invert-base as its ink, so this inverts correctly with the theme.
+ * The one primary action per view. Blue→violet gradient with a soft glow and
+ * hover lift — see .collab-btn-primary in ./collab.css for the fill, shadow
+ * and motion (BTN_BASE still owns shape, focus ring and motion-reduce).
  */
-export const BTN_PRIMARY =
-  BTN_BASE +
-  " bg-(--button-primary-base) text-icon-invert-base border-border-weak-base" +
-  " hover:bg-icon-strong-hover active:bg-icon-strong-active" +
-  " disabled:bg-icon-strong-disabled"
+export const BTN_PRIMARY = BTN_BASE + " collab-btn-primary font-[600]"
 
 /** Ghost structure without a text colour, so variants can set their own ink. */
 const GHOST_SHELL =
@@ -47,10 +53,12 @@ export const BTN_GHOST = GHOST_SHELL + " text-text-base hover:text-text-strong d
 export const BTN_SECONDARY = BTN_GHOST
 
 /**
- * Positive action (open PR, launch preview). Still a ghost button: the intent
- * is carried by the success text token, not by a green fill.
+ * Positive / live action (Launch preview). Emerald→green gradient — restored
+ * from the pre-uplift design, which reserved this family for exactly this
+ * semantic ("approve / live preview"), distinct from BTN_PRIMARY's blue.
+ * See .collab-btn-success in ./collab.css for the fill, shadow and motion.
  */
-export const BTN_SUCCESS = GHOST_SHELL + " text-text-on-success-base disabled:text-text-weak"
+export const BTN_SUCCESS = BTN_BASE + " collab-btn-success font-[600]"
 
 /** 28px square ghost icon button (top bar, rail headers, composer actions). */
 export const BTN_ICON =
@@ -77,6 +85,19 @@ export const ROW_ACTIVE = "bg-collab-accent-soft border-l-2 border-l-collab-acce
 export const CHIP =
   "inline-flex items-center gap-1 rounded-full border border-border-weak-base px-1.5 py-0.5 " +
   "font-mono text-[10.5px] leading-none text-text-base"
+
+/**
+ * Role accent ink — restored from the pre-uplift roleColor() helper: driver
+ * (amber, "holds the wheel") / contributor (blue, "proposing"). Viewer stays
+ * unaccented on purpose (no special standing). Pair with CHIP for a role
+ * pill, e.g. `class={`${CHIP} ${ROLE_TEXT_CLASS[role]}`}`, or apply directly
+ * to a plain label.
+ */
+export const ROLE_TEXT_CLASS: Record<"driver" | "contributor" | "viewer", string> = {
+  driver: "collab-role-driver font-[600]",
+  contributor: "collab-role-contributor font-[600]",
+  viewer: "text-text-base",
+}
 
 /** Rail section label: 11px, uppercase, tracked out. */
 export const LABEL_MICRO = "text-[11px] font-[600] uppercase leading-none tracking-[0.06em] text-text-base"
