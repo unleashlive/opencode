@@ -43,36 +43,51 @@ import { Database } from "@/storage/db"
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
-/** Frontend defaults — applied when no `.opencode-preview.json` is present. */
+/** Frontend defaults — applied when no `.opencode-preview.json` is present.
+ *
+ *  Uses oxc-ng (Vite 8 + @oxc-angular Rust compiler) instead of `ng serve`
+ *  to reduce steady-state RAM from ~4-5 GB to ~350 MB and eliminate the
+ *  Vite 6 optimizeDeps heap-leak that forced the 2-hour lifetime cap.
+ *
+ *  `oxc-ng warm .` after install prebundles deps into the Vite optimizeDeps
+ *  cache (stored in the workspace's node_modules/.vite/ on EFS) so the
+ *  first page load does not trigger a re-bundle storm.  `|| true` makes it
+ *  non-fatal — warm failure just means lazy discovery on first page load.
+ *
+ *  Direct invocation (`oxc-ng . --port 8080`) is used instead of the shim
+ *  (`oxc-ng shim . && pnpm run start`) because the shim writes into
+ *  node_modules/@angular/cli/bin/ng.js and gets wiped by any `pnpm install`
+ *  (e.g. on restart after a branch update), making it non-deterministic.
+ *
+ *  Fallback: if oxc-ng is not on PATH (image built without the github_token
+ *  secret), change command back to "pnpm run start" via .opencode-preview.json
+ *  in the repo. */
 const FRONTEND_DEFAULTS: PreviewConfig = {
-  installCommand: "pnpm i --shamefully-hoist=true",
-  command: "pnpm run start",
+  installCommand: "pnpm i --shamefully-hoist=true && oxc-ng warm . 2>&1 || true",
+  command: "oxc-ng . --port 8080",
   port: 8080,
   label: "Unleash live frontend",
-  readyPattern: undefined,
+  readyPattern: "Local:\\s+http",
   upstreamScheme: "http",
 }
 
 /** Idle window — no traffic for this long → SIGTERM. */
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000
 
-/** Absolute lifetime cap for a single preview run.  Angular CLI 19's `ng
- *  serve` (wrapping Vite 6) has a slow heap leak under sustained traffic:
- *  Vite's optimizeDeps cache rebundles on every new route entry and doesn't
- *  release the previous generation, so RAM ratchets up by hundreds of MB
- *  per hour.  We observed the 16 GB Fargate task getting OOM-killed at the
- *  ~1-hour mark twice in a row on 2026-06-12.  A hard lifetime cap means
- *  the preview gets stopped cleanly *before* the kernel OOM-killer takes
- *  opencode down with it.  Driver can press Launch to re-spawn — the
- *  workspace is preserved, only the dev-server process dies. */
+/** Absolute lifetime cap for a single preview run.  oxc-ng (Vite 8 +
+ *  @oxc-angular) does not exhibit the slow optimizeDeps heap-leak that
+ *  Angular CLI's bundled Vite 6 had (which caused OOM-kills at the ~1-hour
+ *  mark on 2026-06-12).  The cap is kept as belt-and-suspenders against
+ *  unknown long-running issues in any future dev server.  Driver can press
+ *  Launch to re-spawn — the workspace and Vite cache on EFS are preserved. */
 const MAX_LIFETIME_MS = 2 * 60 * 60 * 1000
 
 /** Memory circuit-breaker — when the container's total RSS exceeds this,
  *  stop the preview before the kernel OOM-killer fires.  Fargate task is
- *  sized at 16 GB; opencode itself uses ~500 MB; a healthy ng-serve peaks
- *  around 4-5 GB.  12 GB leaves ~3-4 GB of headroom — enough that a brief
- *  spike (e.g. a heavy compile) doesn't trip the breaker, but well short
- *  of the 16 GB ceiling where the kernel takes the WHOLE task down. */
+ *  sized at 16 GB; opencode itself uses ~500 MB; oxc-ng steady-state is
+ *  ~350 MB (vs ~4-5 GB for the previous Angular CLI / ng serve stack).
+ *  12 GB leaves ~11 GB of headroom for concurrent agent work and compile
+ *  spikes, but caps us well short of the 16 GB ceiling. */
 const MEMORY_CAP_BYTES = 12 * 1024 * 1024 * 1024
 
 /** Install-hang watchdog (S1) — if a preview is still in the `installing`
