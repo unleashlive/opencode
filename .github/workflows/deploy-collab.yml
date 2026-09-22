@@ -80,20 +80,34 @@ jobs:
             ${{ steps.img.outputs.sha_image }}
           cache-from: type=gha,scope=opencode-collab
           cache-to: type=gha,scope=opencode-collab,mode=max
-          # Build secret for the pnpm store pre-warm (Dockerfile "warm-store"
-          # step, speed win V1).  Needs READ access to unleashlive/frontend +
-          # unleashlive/api so the shallow clones + `pnpm fetch` populate the
-          # store baked into the image.  Provision a fine-grained PAT (or a
-          # GitHub App installation token) with Contents:read on those two
-          # repos and store it as the repo secret WARM_STORE_GITHUB_TOKEN.
+          # Cross-repo read token, consumed by THREE Dockerfile steps — not
+          # just the pnpm pre-warm the name suggests:
+          #   Dockerfile:184  clone unleashlive/oxc-ng   → /opt/oxc-ng
+          #   Dockerfile:382  clone unleashlive/Forge    → ~/.forge
+          #   Dockerfile:435  clone frontend + api       → pnpm store warm
+          #
+          # So WARM_STORE_GITHUB_TOKEN needs Contents:read on ALL FOUR repos:
+          # oxc-ng, Forge, frontend, api.  A token minted before any of those
+          # repos existed cannot cover it — that is exactly how oxc-ng broke
+          # (repo created 2026-09-21, token last issued 2026-07-23).
           #
           # OPTIONAL: when the secret is unset, build-push-action passes an
-          # empty value, the Dockerfile's `[ ! -s ]` guard skips the warm, and
-          # the image still builds — runtime installs just stay cold (~10 min)
-          # until a warmed image ships.  So this is safe to merge before the
-          # secret exists.
+          # empty value, every `[ ! -s ]` guard skips, and the image still
+          # builds — oxc-ng falls back to `pnpm run start` and runtime installs
+          # stay cold.  Safe to merge before the secret exists.
+          #
+          # CACHE_BUST args: each clone step is wrapped in an if/else that
+          # swallows failures, so a denied clone still exits 0 and the layer
+          # gets cached as a success.  BuildKit keys on build args + command
+          # text, NOT on secret values — so rotating the token alone changes
+          # nothing.  Bump the relevant arg to force the layer to re-run.
+          # Verified on this pipeline: run 29994392447 (token rotated, arg
+          # untouched) logged "#33 CACHED"; run 29996206184 (arg 1→2) re-ran
+          # the clone.  oxc-ng is upstream of Forge and warm-store in the same
+          # `deps` stage, so busting it invalidates those too.
           build-args: |
             FORGE_CACHE_BUST=2
+            OXC_NG_CACHE_BUST=2
           secrets: |
             github_token=${{ secrets.WARM_STORE_GITHUB_TOKEN }}
 
