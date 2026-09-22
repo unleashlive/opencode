@@ -162,6 +162,38 @@ ENV GIT_ASKPASS=/usr/local/bin/git-askpass-token
 # unleashlive/frontend's lockfile.
 RUN npm install --global pnpm@10 2>&1 | tail -3 && pnpm --version
 
+# oxc-ng — replaces `ng serve` with Vite 8 + @oxc-angular (Rust template
+# compiler).  Steady-state RAM drops from ~4-5 GB (Angular CLI / Vite 6 +
+# TypeScript full-program checker) to ~350 MB, removing the primary pressure
+# that hit the 12 GB container circuit-breaker.  The tool's own node_modules
+# supplies Vite/oxc; the project's node_modules supplies Angular/TS — two
+# separate resolution trees by design.
+#
+# Installed at /opt/oxc-ng (writable by uid 10001 at runtime so oxc-ng can
+# populate its include-cache on first start).  oxc-ng is a private unleashlive
+# repo so we need the github_token BuildKit secret; when it's absent (local
+# builds) the step skips gracefully and the preview falls back to pnpm run start.
+ARG OXC_NG_CACHE_BUST=1
+RUN --mount=type=secret,id=github_token,required=false \
+    TOKEN_FILE=/run/secrets/github_token; \
+    if [ ! -s "$TOKEN_FILE" ]; then \
+      echo "[oxc-ng] no github_token secret — skipping oxc-ng installation (preview will use pnpm run start)"; \
+    else \
+      TOKEN="$(cat "$TOKEN_FILE")"; \
+      echo "[oxc-ng] cloning unleashlive/oxc-ng…"; \
+      if git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/unleashlive/oxc-ng.git" /opt/oxc-ng >/tmp/oxc-ng-clone.log 2>&1; then \
+        cd /opt/oxc-ng && npm ci 2>&1 | tail -5; \
+        chown -R 10001:10001 /opt/oxc-ng; \
+        echo "[oxc-ng] installed at /opt/oxc-ng"; \
+        rm -f /tmp/oxc-ng-clone.log; \
+      else \
+        echo "[oxc-ng] WARNING: clone failed — preview will use pnpm run start:"; \
+        tail -3 /tmp/oxc-ng-clone.log || true; \
+        rm -f /tmp/oxc-ng-clone.log; \
+      fi; \
+    fi
+ENV PATH="/opt/oxc-ng/bin:${PATH}"
+
 # Bundle the Unleash Live MCP server (pre-built Node.js bundle from the .mcpb
 # package).  Placed at a fixed path so the per-session opencode config (written
 # by workspace.ts when a Driver configures an access token) can reference it
