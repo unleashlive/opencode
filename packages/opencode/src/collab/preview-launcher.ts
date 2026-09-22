@@ -64,7 +64,7 @@ import { Database } from "@/storage/db"
  *  in the repo. */
 const FRONTEND_DEFAULTS: PreviewConfig = {
   installCommand: "pnpm i --shamefully-hoist=true && oxc-ng warm . 2>&1 || true",
-  command: "oxc-ng . --port 8080",
+  command: "command -v oxc-ng >/dev/null 2>&1 && oxc-ng . --port 8080 || pnpm run start",
   port: 8080,
   label: "Unleash live frontend",
   readyPattern: "Local:\\s+http",
