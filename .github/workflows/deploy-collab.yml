@@ -94,6 +94,7 @@ jobs:
           # secret exists.
           build-args: |
             FORGE_CACHE_BUST=2
+            OLLAMA_CACHE_BUST=1
           secrets: |
             github_token=${{ secrets.WARM_STORE_GITHUB_TOKEN }}
 

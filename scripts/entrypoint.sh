@@ -121,6 +121,53 @@ echo "[entrypoint] CLAUDE_CREDENTIALS_PATH=$CLAUDE_CREDENTIALS_PATH"
 # container uid; tracked separately.
 git config --global --add safe.directory '*' 2>/dev/null || true
 
+# Start Ollama local inference server.
+# Models are stored on EFS so they survive container restarts.
+# Model pulls run in the background so opencode (and the ECS /healthz endpoint)
+# start immediately — the first LLM request will block until the model is ready.
+if command -v ollama >/dev/null 2>&1; then
+  export OLLAMA_MODELS="${HOME_DIR}/.local/share/opencode/ollama"
+  export OLLAMA_HOST=127.0.0.1:11434
+  export OLLAMA_NUM_PARALLEL=2
+
+  mkdir -p "$OLLAMA_MODELS" 2>/dev/null || true
+
+  echo "[ollama] starting server…"
+  ollama serve &
+
+  # Wait up to 30s for the Ollama API to accept connections.
+  _OLLAMA_READY=0
+  for _i in $(seq 1 30); do
+    if curl -sf http://127.0.0.1:11434/v1/models >/dev/null 2>&1; then
+      _OLLAMA_READY=1
+      break
+    fi
+    sleep 1
+  done
+
+  if [ "$_OLLAMA_READY" = "1" ]; then
+    # Pull models in background — non-blocking so ECS health check isn't delayed.
+    # On first boot this downloads ~4.5 GB per model to EFS; subsequent boots
+    # detect the cached files and skip.  The opencode model picker will show
+    # errors for local models until the pull completes.
+    (
+      for _MODEL in "qwen3:8b-q4_K_M" "qwen2.5-coder:7b-instruct-q4_K_M"; do
+        _SHORT="${_MODEL%%:*}"
+        if ! ollama list 2>/dev/null | grep -q "$_SHORT"; then
+          echo "[ollama] pulling $_MODEL (first boot, ~4.5 GB — will complete in background)…"
+          ollama pull "$_MODEL" \
+            && echo "[ollama] $_MODEL ready" \
+            || echo "[ollama] WARNING: pull failed for $_MODEL — retry on next boot"
+        else
+          echo "[ollama] $_MODEL already cached on EFS"
+        fi
+      done
+    ) &
+  else
+    echo "[ollama] WARNING: server did not respond within 30s — local models unavailable"
+  fi
+fi
+
 # Hand off to the real server.  $@ propagates whatever args ECS / CMD passed.
 exec bun run --cwd packages/opencode src/index.ts serve \
   --port 4096 --hostname 0.0.0.0 --print-logs "$@"
