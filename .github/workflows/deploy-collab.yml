@@ -32,7 +32,7 @@ jobs:
   deploy:
     name: Build + push + deploy to utils
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
