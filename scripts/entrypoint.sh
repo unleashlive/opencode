@@ -129,6 +129,9 @@ if command -v ollama >/dev/null 2>&1; then
   export OLLAMA_MODELS="${HOME_DIR}/.local/share/opencode/ollama"
   export OLLAMA_HOST=127.0.0.1:11434
   export OLLAMA_NUM_PARALLEL=2
+  # Pin thread count to the task's vCPU allocation.  Without this, llama.cpp
+  # auto-detects physical cores which may under-count in a Fargate cgroup.
+  export OLLAMA_NUM_THREAD=4
 
   mkdir -p "$OLLAMA_MODELS" 2>/dev/null || true
 
@@ -155,7 +158,7 @@ if command -v ollama >/dev/null 2>&1; then
     # the pre-warm the model stays resident (keep_alive is Ollama's default 5 min
     # extended by any subsequent request) so chat responses start immediately.
     (
-      for _MODEL in "qwen3:8b-q4_K_M" "qwen2.5-coder:7b-instruct-q4_K_M"; do
+      for _MODEL in "qwen2.5-coder:7b-instruct-q4_K_M" "qwen3:8b-q4_K_M"; do
         _SHORT="${_MODEL%%:*}"
         if ! ollama list 2>/dev/null | grep -q "$_SHORT"; then
           echo "[ollama] pulling $_MODEL (first boot, ~4.5 GB — will complete in background)…"
@@ -167,10 +170,13 @@ if command -v ollama >/dev/null 2>&1; then
         fi
       done
 
-      # Pre-warm the default model into RAM once all pulls are done.
-      echo "[ollama] pre-warming qwen3:8b-q4_K_M into RAM (may take 90–120 s on EFS)…"
+      # Pre-warm the default model (qwen2.5-coder) into RAM once pulls are done.
+      # Using keep_alive:-1 loads the model without inference — faster than a
+      # full forward pass and avoids the 90–120 s EFS page-fault penalty on the
+      # first real user request.
+      echo "[ollama] pre-warming qwen2.5-coder:7b-instruct-q4_K_M into RAM…"
       curl -sf http://127.0.0.1:11434/api/generate \
-        -d '{"model":"qwen3:8b-q4_K_M","prompt":"Hi","stream":false,"options":{"num_predict":1}}' \
+        -d '{"model":"qwen2.5-coder:7b-instruct-q4_K_M","keep_alive":-1}' \
         >/dev/null 2>&1 \
         && echo "[ollama] model warm — first user request will be fast" \
         || echo "[ollama] WARNING: pre-warm failed — first request may be slow"
