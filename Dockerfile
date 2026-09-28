@@ -25,6 +25,12 @@
 # The OUTPUT of this stage is content-addressed: if none of those files change,
 # downstream COPY --from=manifests is a cache hit and `bun install` is skipped.
 # ─────────────────────────────────────────────────────────────────────────────
+# Pull the Ollama binary from the official image.
+# Used in the deps stage via COPY --from=ollama-src to avoid needing curl in
+# the base image.  Only /usr/local/bin/ollama and the CPU backend lib are copied
+# into the final image — the CUDA/ROCm layers from this stage are discarded.
+FROM ollama/ollama:latest AS ollama-src
+
 FROM busybox AS manifests
 WORKDIR /m
 COPY . .
@@ -195,12 +201,15 @@ RUN --mount=type=secret,id=github_token,required=false \
 ENV PATH="/opt/oxc-ng/bin:${PATH}"
 
 # Ollama — local LLM inference server (OpenAI-compatible).
-# Binary only (~150 MB) baked into the image; model GGUF files (~4.5 GB each)
-# are downloaded to EFS on first boot and cached there across task restarts.
-# OLLAMA_CACHE_BUST: bump to force re-download of the binary after a new release.
-ARG OLLAMA_CACHE_BUST=1
-RUN curl -fsSL https://ollama.com/install.sh | sh 2>&1 | tail -5 && \
-    ollama --version
+# Binary and CPU backend libs copied from the official ollama/ollama image —
+# no curl or install script needed.  GPU (CUDA/ROCm) layers are NOT copied;
+# Fargate is CPU-only.  Model GGUF files (~4.5 GB each) are downloaded to EFS
+# on first boot and cached across task restarts.
+# OLLAMA_CACHE_BUST: bump to pick up a newer ollama/ollama base image.
+ARG OLLAMA_CACHE_BUST=2
+COPY --from=ollama-src /usr/local/bin/ollama /usr/local/bin/ollama
+COPY --from=ollama-src /usr/local/lib/ollama /usr/local/lib/ollama
+RUN ollama --version
 
 # Bundle the Unleash Live MCP server (pre-built Node.js bundle from the .mcpb
 # package).  Placed at a fixed path so the per-session opencode config (written
