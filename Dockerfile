@@ -194,6 +194,14 @@ RUN --mount=type=secret,id=github_token,required=false \
     fi
 ENV PATH="/opt/oxc-ng/bin:${PATH}"
 
+# Ollama — local LLM inference server (OpenAI-compatible).
+# Binary only (~150 MB) baked into the image; model GGUF files (~4.5 GB each)
+# are downloaded to EFS on first boot and cached there across task restarts.
+# OLLAMA_CACHE_BUST: bump to force re-download of the binary after a new release.
+ARG OLLAMA_CACHE_BUST=1
+RUN curl -fsSL https://ollama.com/install.sh | sh 2>&1 | tail -5 && \
+    ollama --version
+
 # Bundle the Unleash Live MCP server (pre-built Node.js bundle from the .mcpb
 # package).  Placed at a fixed path so the per-session opencode config (written
 # by workspace.ts when a Driver configures an access token) can reference it
@@ -266,7 +274,7 @@ RUN mkdir -p /var/opencode/workspaces \
     # without SYS_ADMIN; `--isolated` gives each connect a throwaway profile (no
     # cross-session state, no disk growth).  60 s timeout because the first
     # connect launches the browser.
-    printf '{"plugin":["opencode-claude-auth@latest"],"disabled_providers":["amazon-bedrock"],"mcp":{"headroom":{"type":"local","command":["headroom","mcp","serve"],"enabled":true,"timeout":30000},"playwright":{"type":"local","command":["playwright-mcp","--headless","--no-sandbox","--isolated","--browser","chromium","--output-dir","/home/opencode/.cache/playwright-output"],"environment":{"PLAYWRIGHT_BROWSERS_PATH":"/home/opencode/.cache/playwright"},"enabled":false,"timeout":60000},"unleash-live":{"type":"local","command":["node","/usr/local/lib/unleash-live-mcp.js"],"environment":{"ACCESS_TOKEN":"","STAGE":"cirrus"},"enabled":false,"timeout":15000}}}\n' \
+    printf '{"plugin":["opencode-claude-auth@latest"],"model":"collab-local/qwen3:8b-q4_K_M","disabled_providers":["amazon-bedrock"],"provider":{"collab-local":{"name":"Local (Ollama)","npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://127.0.0.1:11434/v1","apiKey":"ollama"},"models":{"qwen3:8b-q4_K_M":{"name":"Qwen3 8B","limit":{"context":131072,"output":8192}},"qwen2.5-coder:7b-instruct-q4_K_M":{"name":"Qwen2.5 Coder 7B","limit":{"context":131072,"output":8192}}}}},"mcp":{"headroom":{"type":"local","command":["headroom","mcp","serve"],"enabled":true,"timeout":30000},"playwright":{"type":"local","command":["playwright-mcp","--headless","--no-sandbox","--isolated","--browser","chromium","--output-dir","/home/opencode/.cache/playwright-output"],"environment":{"PLAYWRIGHT_BROWSERS_PATH":"/home/opencode/.cache/playwright"},"enabled":false,"timeout":60000},"unleash-live":{"type":"local","command":["node","/usr/local/lib/unleash-live-mcp.js"],"environment":{"ACCESS_TOKEN":"","STAGE":"cirrus"},"enabled":false,"timeout":15000}}}\n' \
       > /home/opencode/.config/opencode/opencode.json && \
     # Global AGENTS.md — opencode auto-loads $XDG_CONFIG_HOME/opencode/AGENTS.md
     # (= /home/opencode/.config/opencode/AGENTS.md here) into the system
