@@ -58,7 +58,7 @@ WORKDIR /app
 # install.  We don't actually USE ssh auth (no key shipped); the next layer
 # rewrites every git ssh URL to authenticated HTTPS via a system gitconfig.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git ca-certificates curl python3 python3-pip make g++ nodejs npm openssh-client && \
+        git ca-certificates curl python3 python3-pip make g++ nodejs npm openssh-client zstd && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Headroom (token-compression MCP server, chopratejas/headroom).
@@ -195,23 +195,14 @@ RUN --mount=type=secret,id=github_token,required=false \
 ENV PATH="/opt/oxc-ng/bin:${PATH}"
 
 # Ollama — local LLM inference server (OpenAI-compatible).
-# Downloads the CPU-only linux/amd64 tarball from GitHub releases (~200 MB).
-# This avoids the multi-GB CUDA/ROCm runner libs that ship in ollama/ollama:latest
-# and would cause OOM on the CPU-only Fargate task.
-# The tarball extracts to /usr/local/bin/ollama + /usr/local/lib/ollama/ which is
-# exactly where the binary expects to find its CPU runner (llama-server) and
-# shared libs (libggml-cpu.so etc.) at runtime.
-# Model GGUF files (~4.5 GB each) are downloaded to EFS on first boot and
-# cached across task restarts.
-# Bump OLLAMA_CACHE_BUST to force re-download after an Ollama release.
-ARG OLLAMA_CACHE_BUST=3
-RUN set -eux; \
-    OLLAMA_VER=$(curl -sf https://api.github.com/repos/ollama/ollama/releases/latest \
-      | grep '"tag_name"' | head -1 | sed 's/.*"\(v[^"]*\)".*/\1/') \
-      || OLLAMA_VER=v0.9.6; \
-    echo "Installing Ollama ${OLLAMA_VER} (CPU tarball)…"; \
-    curl -fsSL "https://github.com/ollama/ollama/releases/download/${OLLAMA_VER}/ollama-linux-amd64.tgz" \
-      | tar -xz -C /usr/local; \
+# Uses the official install.sh which downloads ollama-linux-amd64.tar.zst
+# (CPU-only, ~200 MB) and extracts to /usr/local/bin/ollama +
+# /usr/local/lib/ollama/.  No CUDA/ROCm runners are included.
+# zstd must be in apt (added above) for the .tar.zst extraction.
+# Model GGUF files (~4.5 GB each) are downloaded to EFS on first boot.
+# Bump OLLAMA_CACHE_BUST to force a re-install after an Ollama release.
+ARG OLLAMA_CACHE_BUST=4
+RUN curl -fsSL https://ollama.com/install.sh | sh && \
     ollama --version
 
 # Bundle the Unleash Live MCP server (pre-built Node.js bundle from the .mcpb
