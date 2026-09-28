@@ -208,6 +208,12 @@ ENV PATH="/opt/oxc-ng/bin:${PATH}"
 # OLLAMA_CACHE_BUST: bump to pick up a newer ollama/ollama base image.
 ARG OLLAMA_CACHE_BUST=2
 COPY --from=ollama-src /bin/ollama /usr/local/bin/ollama
+# Ollama binary at /usr/local/bin/ resolves its OLLAMA_LIBRARY_PATH as
+# /usr/local/lib/ollama/.  In the source image the runners live at /lib/ollama/
+# (relative to /bin/ollama), so we remap the copy destination accordingly.
+# llama-server (CPU runner) and any GPU variants all live here; Ollama picks
+# the right one at startup based on available hardware.
+COPY --from=ollama-src /lib/ollama /usr/local/lib/ollama
 RUN ollama --version
 
 # Bundle the Unleash Live MCP server (pre-built Node.js bundle from the .mcpb
