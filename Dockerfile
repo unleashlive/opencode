@@ -25,12 +25,6 @@
 # The OUTPUT of this stage is content-addressed: if none of those files change,
 # downstream COPY --from=manifests is a cache hit and `bun install` is skipped.
 # ─────────────────────────────────────────────────────────────────────────────
-# Pull the Ollama binary from the official image.
-# Used in the deps stage via COPY --from=ollama-src to avoid needing curl in
-# the base image.  Only /usr/local/bin/ollama and the CPU backend lib are copied
-# into the final image — the CUDA/ROCm layers from this stage are discarded.
-FROM ollama/ollama:latest AS ollama-src
-
 FROM busybox AS manifests
 WORKDIR /m
 COPY . .
@@ -201,20 +195,24 @@ RUN --mount=type=secret,id=github_token,required=false \
 ENV PATH="/opt/oxc-ng/bin:${PATH}"
 
 # Ollama — local LLM inference server (OpenAI-compatible).
-# Binary and CPU backend libs copied from the official ollama/ollama image —
-# no curl or install script needed.  GPU (CUDA/ROCm) layers are NOT copied;
-# Fargate is CPU-only.  Model GGUF files (~4.5 GB each) are downloaded to EFS
-# on first boot and cached across task restarts.
-# OLLAMA_CACHE_BUST: bump to pick up a newer ollama/ollama base image.
-ARG OLLAMA_CACHE_BUST=2
-COPY --from=ollama-src /bin/ollama /usr/local/bin/ollama
-# Ollama binary at /usr/local/bin/ resolves its OLLAMA_LIBRARY_PATH as
-# /usr/local/lib/ollama/.  In the source image the runners live at /lib/ollama/
-# (relative to /bin/ollama), so we remap the copy destination accordingly.
-# llama-server (CPU runner) and any GPU variants all live here; Ollama picks
-# the right one at startup based on available hardware.
-COPY --from=ollama-src /lib/ollama /usr/local/lib/ollama
-RUN ollama --version
+# Downloads the CPU-only linux/amd64 tarball from GitHub releases (~200 MB).
+# This avoids the multi-GB CUDA/ROCm runner libs that ship in ollama/ollama:latest
+# and would cause OOM on the CPU-only Fargate task.
+# The tarball extracts to /usr/local/bin/ollama + /usr/local/lib/ollama/ which is
+# exactly where the binary expects to find its CPU runner (llama-server) and
+# shared libs (libggml-cpu.so etc.) at runtime.
+# Model GGUF files (~4.5 GB each) are downloaded to EFS on first boot and
+# cached across task restarts.
+# Bump OLLAMA_CACHE_BUST to force re-download after an Ollama release.
+ARG OLLAMA_CACHE_BUST=3
+RUN set -eux; \
+    OLLAMA_VER=$(curl -sf https://api.github.com/repos/ollama/ollama/releases/latest \
+      | grep '"tag_name"' | head -1 | sed 's/.*"\(v[^"]*\)".*/\1/') \
+      || OLLAMA_VER=v0.9.6; \
+    echo "Installing Ollama ${OLLAMA_VER} (CPU tarball)…"; \
+    curl -fsSL "https://github.com/ollama/ollama/releases/download/${OLLAMA_VER}/ollama-linux-amd64.tgz" \
+      | tar -xz -C /usr/local; \
+    ollama --version
 
 # Bundle the Unleash Live MCP server (pre-built Node.js bundle from the .mcpb
 # package).  Placed at a fixed path so the per-session opencode config (written
