@@ -158,7 +158,7 @@ if command -v ollama >/dev/null 2>&1; then
     # the pre-warm the model stays resident (keep_alive is Ollama's default 5 min
     # extended by any subsequent request) so chat responses start immediately.
     (
-      for _MODEL in "qwen2.5-coder:7b-instruct-q4_K_M" "qwen3:8b-q4_K_M"; do
+      for _MODEL in "qwen3:8b-q4_K_M" "qwen2.5-coder:7b-instruct-q4_K_M"; do
         _SHORT="${_MODEL%%:*}"
         if ! ollama list 2>/dev/null | grep -q "$_SHORT"; then
           echo "[ollama] pulling $_MODEL (first boot, ~4.5 GB — will complete in background)…"
@@ -170,13 +170,30 @@ if command -v ollama >/dev/null 2>&1; then
         fi
       done
 
-      # Pre-warm the default model (qwen2.5-coder) into RAM once pulls are done.
-      # Using keep_alive:-1 loads the model without inference — faster than a
-      # full forward pass and avoids the 90–120 s EFS page-fault penalty on the
-      # first real user request.
-      echo "[ollama] pre-warming qwen2.5-coder:7b-instruct-q4_K_M into RAM…"
+      # Create a no-think variant of qwen3 so the default model responds
+      # immediately without generating hidden reasoning tokens.  think=false
+      # is a Qwen3-specific Ollama parameter; without it the model runs
+      # chain-of-thought internally before producing any visible output,
+      # which adds latency proportional to reasoning complexity.
+      _MODELFILE="$OLLAMA_MODELS/.qwen3-fast.Modelfile"
+      printf 'FROM qwen3:8b-q4_K_M\nPARAMETER think false\nPARAMETER num_thread 4\n' \
+        > "$_MODELFILE" 2>/dev/null || true
+      if [ -s "$_MODELFILE" ]; then
+        ollama create qwen3-fast:8b -f "$_MODELFILE" >/dev/null 2>&1 \
+          && echo "[ollama] qwen3-fast:8b created (thinking disabled)" \
+          || echo "[ollama] WARNING: could not create qwen3-fast:8b — falling back to base model"
+      fi
+
+      # Pre-warm the default model into RAM.  keep_alive:-1 loads weights
+      # without running inference — avoids the 90–120 s EFS page-fault
+      # penalty on first real user request.
+      _WARM_MODEL="qwen3-fast:8b"
+      if ! ollama list 2>/dev/null | grep -q "qwen3-fast"; then
+        _WARM_MODEL="qwen3:8b-q4_K_M"
+      fi
+      echo "[ollama] pre-warming $_WARM_MODEL into RAM…"
       curl -sf http://127.0.0.1:11434/api/generate \
-        -d '{"model":"qwen2.5-coder:7b-instruct-q4_K_M","keep_alive":-1}' \
+        -d "{\"model\":\"$_WARM_MODEL\",\"keep_alive\":-1}" \
         >/dev/null 2>&1 \
         && echo "[ollama] model warm — first user request will be fast" \
         || echo "[ollama] WARNING: pre-warm failed — first request may be slow"
