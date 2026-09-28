@@ -146,10 +146,14 @@ if command -v ollama >/dev/null 2>&1; then
   done
 
   if [ "$_OLLAMA_READY" = "1" ]; then
-    # Pull models in background — non-blocking so ECS health check isn't delayed.
-    # On first boot this downloads ~4.5 GB per model to EFS; subsequent boots
-    # detect the cached files and skip.  The opencode model picker will show
-    # errors for local models until the pull completes.
+    # Pull models then pre-warm — all in background so ECS health check isn't
+    # delayed.  On first boot this downloads ~4.5 GB per model to EFS; subsequent
+    # boots detect the cached files and skip straight to the pre-warm step.
+    # Pre-warming loads the default model (qwen3:8b-q4_K_M) into RAM by running a
+    # trivial 1-token generation.  Without this, the first real user request would
+    # block for 90–120 s while the 5.2 GB weights are paged in from EFS.  After
+    # the pre-warm the model stays resident (keep_alive is Ollama's default 5 min
+    # extended by any subsequent request) so chat responses start immediately.
     (
       for _MODEL in "qwen3:8b-q4_K_M" "qwen2.5-coder:7b-instruct-q4_K_M"; do
         _SHORT="${_MODEL%%:*}"
@@ -162,6 +166,14 @@ if command -v ollama >/dev/null 2>&1; then
           echo "[ollama] $_MODEL already cached on EFS"
         fi
       done
+
+      # Pre-warm the default model into RAM once all pulls are done.
+      echo "[ollama] pre-warming qwen3:8b-q4_K_M into RAM (may take 90–120 s on EFS)…"
+      curl -sf http://127.0.0.1:11434/api/generate \
+        -d '{"model":"qwen3:8b-q4_K_M","prompt":"Hi","stream":false,"options":{"num_predict":1}}' \
+        >/dev/null 2>&1 \
+        && echo "[ollama] model warm — first user request will be fast" \
+        || echo "[ollama] WARNING: pre-warm failed — first request may be slow"
     ) &
   else
     echo "[ollama] WARNING: server did not respond within 30s — local models unavailable"
