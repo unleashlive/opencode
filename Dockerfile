@@ -58,7 +58,7 @@ WORKDIR /app
 # install.  We don't actually USE ssh auth (no key shipped); the next layer
 # rewrites every git ssh URL to authenticated HTTPS via a system gitconfig.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git ca-certificates python3 python3-pip make g++ nodejs npm openssh-client && \
+        git ca-certificates curl python3 python3-pip make g++ nodejs npm openssh-client && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Headroom (token-compression MCP server, chopratejas/headroom).
