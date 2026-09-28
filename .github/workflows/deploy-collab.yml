@@ -108,7 +108,7 @@ jobs:
           build-args: |
             FORGE_CACHE_BUST=2
             OXC_NG_CACHE_BUST=2
-            OLLAMA_CACHE_BUST=4
+            OLLAMA_CACHE_BUST=5
           secrets: |
             github_token=${{ secrets.WARM_STORE_GITHUB_TOKEN }}
 

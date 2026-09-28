@@ -201,8 +201,13 @@ ENV PATH="/opt/oxc-ng/bin:${PATH}"
 # zstd must be in apt (added above) for the .tar.zst extraction.
 # Model GGUF files (~4.5 GB each) are downloaded to EFS on first boot.
 # Bump OLLAMA_CACHE_BUST to force a re-install after an Ollama release.
-ARG OLLAMA_CACHE_BUST=4
-RUN curl -fsSL https://ollama.com/install.sh | sh && \
+ARG OLLAMA_CACHE_BUST=5
+# curl must be available at this layer.  Normally it arrives from the apt-get
+# step above, but a GHA BuildKit cache miss on that layer can leave this step
+# running on the raw base image.  Re-install defensively.
+RUN command -v curl >/dev/null 2>&1 || \
+      (apt-get update -q && apt-get install -y --no-install-recommends curl zstd && rm -rf /var/lib/apt/lists/*) && \
+    curl -fsSL https://ollama.com/install.sh | sh && \
     ollama --version
 
 # Bundle the Unleash Live MCP server (pre-built Node.js bundle from the .mcpb
