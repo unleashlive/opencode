@@ -207,7 +207,7 @@ ENV PATH="/opt/oxc-ng/bin:${PATH}"
 # on first boot and cached across task restarts.
 # OLLAMA_CACHE_BUST: bump to pick up a newer ollama/ollama base image.
 ARG OLLAMA_CACHE_BUST=2
-COPY --from=ollama-src /usr/local/bin/ollama /usr/local/bin/ollama
+COPY --from=ollama-src /bin/ollama /usr/local/bin/ollama
 RUN ollama --version
 
 # Bundle the Unleash Live MCP server (pre-built Node.js bundle from the .mcpb
