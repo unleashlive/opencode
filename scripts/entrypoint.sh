@@ -158,7 +158,7 @@ if command -v ollama >/dev/null 2>&1; then
     # the pre-warm the model stays resident (keep_alive is Ollama's default 5 min
     # extended by any subsequent request) so chat responses start immediately.
     (
-      for _MODEL in "qwen3:8b-q4_K_M"; do
+      for _MODEL in "qwen3:1.7b-q4_K_M"; do
         _SHORT="${_MODEL%%:*}"
         if ! ollama list 2>/dev/null | grep -q "$_SHORT"; then
           echo "[ollama] pulling $_MODEL (first boot, ~4.5 GB — will complete in background)…"
@@ -173,7 +173,7 @@ if command -v ollama >/dev/null 2>&1; then
       # Pre-warm the model into RAM.  keep_alive:-1 loads weights
       # without running inference — avoids the 90–120 s EFS page-fault
       # penalty on first real user request.
-      _WARM_MODEL="qwen3:8b-q4_K_M"
+      _WARM_MODEL="qwen3:1.7b-q4_K_M"
       echo "[ollama] pre-warming $_WARM_MODEL into RAM…"
       curl -sf http://127.0.0.1:11434/api/generate \
         -d "{\"model\":\"$_WARM_MODEL\",\"keep_alive\":-1}" \
