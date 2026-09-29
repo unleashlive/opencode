@@ -179,17 +179,32 @@ if command -v ollama >/dev/null 2>&1; then
       printf 'FROM qwen3:8b-q4_K_M\nPARAMETER think false\nPARAMETER num_thread 4\n' \
         > "$_MODELFILE" 2>/dev/null || true
       if [ -s "$_MODELFILE" ]; then
-        ollama create qwen3-fast:8b -f "$_MODELFILE" >/dev/null 2>&1 \
-          && echo "[ollama] qwen3-fast:8b created (thinking disabled)" \
-          || echo "[ollama] WARNING: could not create qwen3-fast:8b — falling back to base model"
+        if ollama create qwen3-fast:8b -f "$_MODELFILE" >/dev/null 2>&1; then
+          echo "[ollama] qwen3-fast:8b created (thinking disabled)"
+          # Promote qwen3-fast to the active default so new sessions use it.
+          # The baked opencode.json ships with qwen3:8b-q4_K_M as a safe
+          # fallback; once the fast variant exists we swap the "model" field.
+          _CFG=/home/opencode/.config/opencode/opencode.json
+          if command -v python3 >/dev/null 2>&1 && [ -s "$_CFG" ]; then
+            python3 -c "
+import json, sys
+with open('$_CFG') as f: cfg = json.load(f)
+cfg['model'] = 'collab-local/qwen3-fast:8b'
+with open('$_CFG', 'w') as f: json.dump(cfg, f)
+" 2>/dev/null && echo "[ollama] opencode.json default updated to qwen3-fast:8b" \
+              || echo "[ollama] WARNING: could not patch opencode.json — keeping qwen3 base as default"
+          fi
+        else
+          echo "[ollama] WARNING: could not create qwen3-fast:8b — using qwen3 base"
+        fi
       fi
 
-      # Pre-warm the default model into RAM.  keep_alive:-1 loads weights
+      # Pre-warm the active default into RAM.  keep_alive:-1 loads weights
       # without running inference — avoids the 90–120 s EFS page-fault
       # penalty on first real user request.
-      _WARM_MODEL="qwen3-fast:8b"
-      if ! ollama list 2>/dev/null | grep -q "qwen3-fast"; then
-        _WARM_MODEL="qwen3:8b-q4_K_M"
+      _WARM_MODEL="qwen3:8b-q4_K_M"
+      if ollama list 2>/dev/null | grep -q "qwen3-fast"; then
+        _WARM_MODEL="qwen3-fast:8b"
       fi
       echo "[ollama] pre-warming $_WARM_MODEL into RAM…"
       curl -sf http://127.0.0.1:11434/api/generate \
