@@ -260,7 +260,10 @@ function OverflowMenu(props: {
 
   async function signOut() {
     await fetch("/collab/auth/logout", { method: "POST" })
-    window.location.href = `/collab/auth/github?next=/collab/${collab.session()?.id ?? ""}`
+    // Redirect to the sessions list with ?signed_out=1 so the page shows a
+    // "Sign in with GitHub" button instead of auto-redirecting through OAuth
+    // (which would re-auth silently and look like a page reload).
+    window.location.href = "/collab/new?signed_out=1"
   }
 
   return (
