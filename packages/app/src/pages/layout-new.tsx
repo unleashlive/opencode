@@ -57,12 +57,18 @@ export default function NewLayout(props: ParentProps) {
     install: () => void platform.updater?.install(),
   }
 
+  // Inside the collab iframe, the outer collab page (session.tsx) already
+  // handles safe-area insets via h-dvh + the mobile tab strip. Adding them
+  // here a second time pushes the prompt dock up by the home-indicator height
+  // and leaves a gap at the bottom that blocks the text entry on notched phones.
+  const collabEmbed = isCollabEmbed()
+
   return (
     <div
       class="relative bg-v2-background-bg-deep flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text"
       style={{
-        "padding-top": "env(safe-area-inset-top, 0px)",
-        "padding-bottom": "env(safe-area-inset-bottom, 0px)",
+        "padding-top": collabEmbed ? "0px" : "env(safe-area-inset-top, 0px)",
+        "padding-bottom": collabEmbed ? "0px" : "env(safe-area-inset-bottom, 0px)",
       }}
     >
       <Titlebar

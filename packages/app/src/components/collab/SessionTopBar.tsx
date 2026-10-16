@@ -180,6 +180,7 @@ function OverflowMenu(props: {
 }) {
   const collab = useCollab()
   const isDriver = () => props.myRole === "driver"
+  const isContributor = () => props.myRole === "contributor"
 
   const [compactState, setCompactState] = createSignal<"idle" | "busy" | "done">("idle")
   const [exportBusy, setExportBusy] = createSignal(false)
@@ -300,12 +301,14 @@ function OverflowMenu(props: {
             />
           </Show>
 
-          <Show when={isDriver()}>
+          <Show when={isDriver() || isContributor()}>
             <MenuItem
               label={collab.mcpConfigured() ? "Unleash MCP active" : "Configure MCP"}
               hint="Unleash Live MCP credentials for this session"
               onSelect={() => pick(props.onMcpConfig)}
             />
+          </Show>
+          <Show when={isDriver()}>
             <MenuItem label="Add repository" hint="Clone another repo onto the collab branch" onSelect={() => pick(props.onAddRepo)} />
           </Show>
 

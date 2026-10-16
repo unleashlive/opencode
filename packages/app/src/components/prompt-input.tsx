@@ -1823,7 +1823,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   </div>
                 </Show>
                 <Show when={!providersLoading()}>
-                  <Show when={store.mode !== "shell"}>
+                  {/* In collab embed the model is preset server-side — hide the
+                      selector to keep the toolbar compact on narrow viewports. */}
+                  <Show when={store.mode !== "shell" && !isCollabEmbed()}>
                     <div
                       data-component="prompt-model-control"
                       classList={{ "animate-in fade-in duration-300": providersShouldFadeIn() }}
