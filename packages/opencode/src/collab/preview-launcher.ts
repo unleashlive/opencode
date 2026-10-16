@@ -550,15 +550,21 @@ export function launchPreview(
     // `.opencode-preview.json` later if needed; for now, no launcher-side
     // policy.
   }
-  // Per-launch GitHub OAuth token for the install's git fetches.  Picked up
-  // by the container's GIT_ASKPASS helper (Dockerfile) as `Password` against
-  // the static `Username: x-access-token`.  Lives only in this child's env;
-  // unset GITHUB_TOKEN globally so spawning an unauthenticated pnpm install
-  // by some other path doesn't accidentally inherit it.
+  // Per-launch GitHub OAuth token for the install's git fetches AND npm
+  // package registry auth.  Two roles:
+  //   - GIT_ASKPASS helper (Dockerfile) reads GITHUB_TOKEN as the git password
+  //     for `https://github.com/` private-repo fetches.
+  //   - NODE_AUTH_TOKEN is the standard env var pnpm/npm read for registry
+  //     auth when `.npmrc` contains `//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}`.
+  //     Required for @unleashlive-scoped packages published to GitHub Packages.
+  // Both live only in this child's env; cleared globally so unauthenticated
+  // pnpm installs elsewhere don't accidentally inherit them.
   if (gitAccessToken) {
     env.GITHUB_TOKEN = gitAccessToken
+    env.NODE_AUTH_TOKEN = gitAccessToken
   } else {
     delete env.GITHUB_TOKEN
+    delete env.NODE_AUTH_TOKEN
   }
 
   let child: ChildProcess

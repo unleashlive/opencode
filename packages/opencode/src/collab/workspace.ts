@@ -252,45 +252,76 @@ function mcpConfigPath(collabSessionId: string, repos: string[]): string {
 }
 
 /**
- * Write `.opencode/opencode.json` inside the session's primary repo dir with
- * the Unleash Live MCP server enabled and the decrypted access token.
- * Called by the PUT /mcp router endpoint whenever the Driver saves a token.
+ * Write or remove the per-session `.opencode/opencode.json` based on current
+ * MCP state.  Both the Unleash Live token and the Playwright enabled flag are
+ * written into a single file so the two don't stomp each other.  If neither is
+ * active, the file is removed so the global (all-disabled) defaults take effect.
+ *
+ * @param collabSessionId  Collab session id
+ * @param repos            Linked repos (workspace directory derived from the first)
+ * @param plainToken       Decrypted Unleash Live PAT, or null if not configured
+ * @param playwrightEnabled  Whether the Playwright MCP should be enabled
  */
-export function writeMcpConfig(collabSessionId: string, repos: string[], plainToken: string): void {
+export function syncPerSessionMcpConfig(
+  collabSessionId: string,
+  repos: string[],
+  plainToken: string | null,
+  playwrightEnabled: boolean,
+): void {
   const path = mcpConfigPath(collabSessionId, repos)
   const dir = join(path, "..")
+
   if (!existsSync(nativeSessionDirectory(collabSessionId, repos))) return // workspace not yet ready
-  mkdirSync(dir, { recursive: true })
-  const config = {
-    mcp: {
-      "unleash-live": {
-        type: "local",
-        command: ["node", "/usr/local/lib/unleash-live-mcp.js"],
-        environment: { ACCESS_TOKEN: plainToken, STAGE: "cirrus" },
-        enabled: true,
-        timeout: 15000,
-      },
-    },
+
+  const hasUnleash = !!plainToken
+  if (!hasUnleash && !playwrightEnabled) {
+    // Nothing to enable — remove the override file so global defaults apply.
+    if (existsSync(path)) {
+      try {
+        unlinkSync(path)
+        console.log("[collab.mcp] removed per-session MCP config for", collabSessionId)
+      } catch (err) {
+        console.error("[collab.mcp] failed to remove MCP config:", err)
+      }
+    }
+    return
   }
+
+  mkdirSync(dir, { recursive: true })
+  const mcp: Record<string, unknown> = {}
+  if (hasUnleash) {
+    mcp["unleash-live"] = {
+      type: "local",
+      command: ["node", "/usr/local/lib/unleash-live-mcp.js"],
+      environment: { ACCESS_TOKEN: plainToken, STAGE: "cirrus" },
+      enabled: true,
+      timeout: 15000,
+    }
+  }
+  if (playwrightEnabled) {
+    mcp["playwright"] = {
+      type: "local",
+      command: ["playwright-mcp", "--headless", "--no-sandbox", "--isolated", "--browser", "chromium", "--output-dir", "/home/opencode/.cache/playwright-output"],
+      environment: { PLAYWRIGHT_BROWSERS_PATH: "/home/opencode/.cache/playwright" },
+      enabled: true,
+      timeout: 60000,
+    }
+  }
+  const config = { mcp }
   const tmp = path + ".tmp"
   writeFileSync(tmp, JSON.stringify(config, null, 2), { mode: 0o600 })
   renameSync(tmp, path)
-  console.log("[collab.mcp] wrote per-session MCP config for", collabSessionId)
+  console.log("[collab.mcp] wrote per-session MCP config for", collabSessionId, { hasUnleash, playwrightEnabled })
 }
 
-/**
- * Remove `.opencode/opencode.json` for this session — disables the per-session
- * MCP override so the global (disabled) entry takes effect.
- */
+/** @deprecated Use syncPerSessionMcpConfig instead. */
+export function writeMcpConfig(collabSessionId: string, repos: string[], plainToken: string): void {
+  syncPerSessionMcpConfig(collabSessionId, repos, plainToken, false)
+}
+
+/** @deprecated Use syncPerSessionMcpConfig instead. */
 export function clearMcpConfig(collabSessionId: string, repos: string[]): void {
-  const path = mcpConfigPath(collabSessionId, repos)
-  if (!existsSync(path)) return
-  try {
-    unlinkSync(path)
-    console.log("[collab.mcp] removed per-session MCP config for", collabSessionId)
-  } catch (err) {
-    console.error("[collab.mcp] failed to remove MCP config:", err)
-  }
+  syncPerSessionMcpConfig(collabSessionId, repos, null, false)
 }
 
 /**

@@ -58,7 +58,7 @@ WORKDIR /app
 # install.  We don't actually USE ssh auth (no key shipped); the next layer
 # rewrites every git ssh URL to authenticated HTTPS via a system gitconfig.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git ca-certificates python3 python3-pip make g++ nodejs npm openssh-client && \
+        git ca-certificates curl python3 python3-pip make g++ nodejs npm openssh-client zstd && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Headroom (token-compression MCP server, chopratejas/headroom).
@@ -195,11 +195,19 @@ RUN --mount=type=secret,id=github_token,required=false \
 ENV PATH="/opt/oxc-ng/bin:${PATH}"
 
 # Ollama — local LLM inference server (OpenAI-compatible).
-# Binary only (~150 MB) baked into the image; model GGUF files (~4.5 GB each)
-# are downloaded to EFS on first boot and cached there across task restarts.
-# OLLAMA_CACHE_BUST: bump to force re-download of the binary after a new release.
-ARG OLLAMA_CACHE_BUST=1
-RUN curl -fsSL https://ollama.com/install.sh | sh 2>&1 | tail -5 && \
+# Uses the official install.sh which downloads ollama-linux-amd64.tar.zst
+# (CPU-only, ~200 MB) and extracts to /usr/local/bin/ollama +
+# /usr/local/lib/ollama/.  No CUDA/ROCm runners are included.
+# zstd must be in apt (added above) for the .tar.zst extraction.
+# Model GGUF files (~4.5 GB each) are downloaded to EFS on first boot.
+# Bump OLLAMA_CACHE_BUST to force a re-install after an Ollama release.
+ARG OLLAMA_CACHE_BUST=5
+# curl must be available at this layer.  Normally it arrives from the apt-get
+# step above, but a GHA BuildKit cache miss on that layer can leave this step
+# running on the raw base image.  Re-install defensively.
+RUN command -v curl >/dev/null 2>&1 || \
+      (apt-get update -q && apt-get install -y --no-install-recommends curl zstd && rm -rf /var/lib/apt/lists/*) && \
+    curl -fsSL https://ollama.com/install.sh | sh && \
     ollama --version
 
 # Bundle the Unleash Live MCP server (pre-built Node.js bundle from the .mcpb
@@ -274,7 +282,7 @@ RUN mkdir -p /var/opencode/workspaces \
     # without SYS_ADMIN; `--isolated` gives each connect a throwaway profile (no
     # cross-session state, no disk growth).  60 s timeout because the first
     # connect launches the browser.
-    printf '{"plugin":["opencode-claude-auth@latest"],"model":"collab-local/qwen3:8b-q4_K_M","disabled_providers":["amazon-bedrock"],"provider":{"collab-local":{"name":"Local (Ollama)","npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://127.0.0.1:11434/v1","apiKey":"ollama"},"models":{"qwen3:8b-q4_K_M":{"name":"Qwen3 8B","limit":{"context":131072,"output":8192}},"qwen2.5-coder:7b-instruct-q4_K_M":{"name":"Qwen2.5 Coder 7B","limit":{"context":131072,"output":8192}}}}},"mcp":{"headroom":{"type":"local","command":["headroom","mcp","serve"],"enabled":true,"timeout":30000},"playwright":{"type":"local","command":["playwright-mcp","--headless","--no-sandbox","--isolated","--browser","chromium","--output-dir","/home/opencode/.cache/playwright-output"],"environment":{"PLAYWRIGHT_BROWSERS_PATH":"/home/opencode/.cache/playwright"},"enabled":false,"timeout":60000},"unleash-live":{"type":"local","command":["node","/usr/local/lib/unleash-live-mcp.js"],"environment":{"ACCESS_TOKEN":"","STAGE":"cirrus"},"enabled":false,"timeout":15000}}}\n' \
+    printf '{"plugin":["opencode-claude-auth@latest"],"model":"collab-local/qwen3:1.7b","disabled_providers":["amazon-bedrock"],"provider":{"collab-local":{"name":"Local (Ollama)","npm":"@ai-sdk/openai-compatible","options":{"baseURL":"http://127.0.0.1:11434/v1","apiKey":"ollama","headerTimeout":180000,"chunkTimeout":120000},"models":{"qwen3:1.7b":{"name":"Qwen3 1.7B","limit":{"context":32768,"output":4096}}}}},"mcp":{"headroom":{"type":"local","command":["headroom","mcp","serve"],"enabled":true,"timeout":30000},"playwright":{"type":"local","command":["playwright-mcp","--headless","--no-sandbox","--isolated","--browser","chromium","--output-dir","/home/opencode/.cache/playwright-output"],"environment":{"PLAYWRIGHT_BROWSERS_PATH":"/home/opencode/.cache/playwright"},"enabled":false,"timeout":60000},"unleash-live":{"type":"local","command":["node","/usr/local/lib/unleash-live-mcp.js"],"environment":{"ACCESS_TOKEN":"","STAGE":"cirrus"},"enabled":false,"timeout":15000}}}\n' \
       > /home/opencode/.config/opencode/opencode.json && \
     # Global AGENTS.md — opencode auto-loads $XDG_CONFIG_HOME/opencode/AGENTS.md
     # (= /home/opencode/.config/opencode/AGENTS.md here) into the system

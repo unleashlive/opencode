@@ -87,8 +87,12 @@ interface CollabContextValue {
   compact: () => Promise<void>
   /** Whether the Unleash Live MCP is configured for this session. */
   mcpConfigured: () => boolean
-  /** Driver-only: save (token=string) or clear (token=null) the Unleash Live PAT. */
+  /** Whether the Playwright browser-automation MCP is enabled for this session. */
+  mcpPlaywrightEnabled: () => boolean
+  /** Driver or Contributor: save (token=string) or clear (token=null) the Unleash Live PAT. */
   configureMcp: (token: string | null) => Promise<void>
+  /** Driver or Contributor: toggle Playwright MCP on/off. */
+  togglePlaywright: (enabled: boolean) => Promise<void>
   /** Driver-only: append repos to a session (at create-time recovery or mid-
    *  session via the "+ Add" control).  Returns the actually-new repos
    *  (existing ones are skipped) plus any per-repo branch-collision warnings. */
@@ -213,6 +217,7 @@ export function CollabProvider(props: CollabProviderProps) {
   const [promptLog, setPromptLog] = createSignal<PromptSuggestion[]>([])
   const [activityLog, setActivityLog] = createSignal<CollabActivityEvent[]>([])
   const [mcpConfiguredState, setMcpConfiguredState] = createSignal(false)
+  const [mcpPlaywrightEnabled, setMcpPlaywrightEnabled] = createSignal(false)
   // Frontend live-preview state — null when no preview is running.  Server
   // broadcasts a "started" event on SSE (re)connect when one IS running, so
   // the SPA picks up the state on full page reloads too.  Backed up by a
@@ -380,8 +385,9 @@ export function CollabProvider(props: CollabProviderProps) {
     try {
       const res = await fetch(`/collab/session/${props.collabSessionId}/mcp`)
       if (!res.ok) return
-      const data = (await res.json()) as { configured: boolean }
+      const data = (await res.json()) as { configured: boolean; servers?: { playwright?: { enabled: boolean } } }
       setMcpConfiguredState(Boolean(data.configured))
+      setMcpPlaywrightEnabled(Boolean(data.servers?.playwright?.enabled))
     } catch {
       // ignore — treat as not configured
     }
@@ -846,9 +852,14 @@ export function CollabProvider(props: CollabProviderProps) {
       await api("/compact", "POST")
     },
     mcpConfigured: mcpConfiguredState,
+    mcpPlaywrightEnabled: mcpPlaywrightEnabled,
     async configureMcp(token) {
       await api("/mcp", "PUT", { token: token ?? null })
       setMcpConfiguredState(token !== null && token !== "")
+    },
+    async togglePlaywright(enabled) {
+      await api("/mcp/playwright", "PUT", { enabled })
+      setMcpPlaywrightEnabled(enabled)
     },
     async addRepos(repos) {
       const res = await api("", "PATCH", { repos })

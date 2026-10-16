@@ -54,6 +54,7 @@ import {
   readRepoBranches,
   writeMcpConfig,
   clearMcpConfig,
+  syncPerSessionMcpConfig,
   refreshWorkspaceRemoteTokens,
 } from "./workspace"
 import { readFile } from "node:fs/promises"
@@ -1957,32 +1958,61 @@ async function handleSessionRoutes(req: Request, url: URL, path: string): Promis
     return json({ ok: true }, 200)
   }
 
-  // GET /collab/session/:id/mcp — returns whether the Unleash Live MCP is configured.
-  // All participants can read this (they just see enabled/not, not the token itself).
-  if (req.method === "GET" && parts[3] === "mcp") {
+  // GET /collab/session/:id/mcp — returns MCP state for all three servers.
+  // All participants can read this (token itself is never returned).
+  if (req.method === "GET" && parts[3] === "mcp" && !parts[4]) {
     const token = Session.getMcpToken(sessionId)
-    return json({ configured: token !== null }, 200)
+    const playwrightEnabled = Session.getPlaywrightEnabled(sessionId)
+    return json({
+      // Legacy field kept for backward compatibility.
+      configured: token !== null,
+      // Full per-server state.
+      servers: {
+        headroom: { enabled: true, alwaysOn: true },
+        playwright: { enabled: playwrightEnabled, alwaysOn: false },
+        "unleash-live": { configured: token !== null, alwaysOn: false },
+      },
+    }, 200)
   }
 
-  // PUT /collab/session/:id/mcp — Driver only.  Save or clear the Unleash Live PAT.
+  // PUT /collab/session/:id/mcp — Driver or Contributor.  Save or clear the Unleash Live PAT.
   // Body: { token: string } to set, or { token: null | "" } to remove.
-  if (req.method === "PUT" && parts[3] === "mcp") {
-    if (caller.role !== "driver") return json({ error: "Forbidden — Drivers only" }, 403)
+  if (req.method === "PUT" && parts[3] === "mcp" && !parts[4]) {
+    if (caller.role !== "driver" && caller.role !== "contributor") return json({ error: "Forbidden — Drivers and Contributors only" }, 403)
     const body = await req.json().catch(() => null)
     const rawToken = body?.token
     const secret = process.env["SESSION_SECRET"] ?? ""
+    const playwrightEnabled = Session.getPlaywrightEnabled(sessionId)
 
     if (rawToken && typeof rawToken === "string") {
       const encrypted = encryptToken(rawToken, secret)
       Session.setMcpToken(sessionId, encrypted)
-      writeMcpConfig(sessionId, collabSession.repos, rawToken)
+      syncPerSessionMcpConfig(sessionId, collabSession.repos, rawToken, playwrightEnabled)
       console.log("[collab.mcp] token saved for", sessionId, "by", sess.githubLogin)
     } else {
       Session.setMcpToken(sessionId, null)
-      clearMcpConfig(sessionId, collabSession.repos)
+      syncPerSessionMcpConfig(sessionId, collabSession.repos, null, playwrightEnabled)
       console.log("[collab.mcp] token cleared for", sessionId, "by", sess.githubLogin)
     }
     return json({ ok: true }, 200)
+  }
+
+  // PUT /collab/session/:id/mcp/playwright — Driver or Contributor.
+  // Body: { enabled: boolean }
+  if (req.method === "PUT" && parts[3] === "mcp" && parts[4] === "playwright") {
+    if (caller.role !== "driver" && caller.role !== "contributor") return json({ error: "Forbidden — Drivers and Contributors only" }, 403)
+    const body = await req.json().catch(() => null)
+    const enabled = body?.enabled === true
+    const secret = process.env["SESSION_SECRET"] ?? ""
+    const rawEncrypted = Session.getMcpToken(sessionId)
+    let plainToken: string | null = null
+    if (rawEncrypted) {
+      try { plainToken = decryptToken(rawEncrypted, secret) } catch { /* ignore decrypt error */ }
+    }
+    Session.setPlaywrightEnabled(sessionId, enabled)
+    syncPerSessionMcpConfig(sessionId, collabSession.repos, plainToken, enabled)
+    console.log("[collab.mcp] playwright", enabled ? "enabled" : "disabled", "for", sessionId, "by", sess.githubLogin)
+    return json({ ok: true, enabled }, 200)
   }
 
   // POST /collab/session/:id/pr — Driver only.  Push + open one PR per linked

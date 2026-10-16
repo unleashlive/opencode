@@ -53,6 +53,14 @@ export const CollabSessionTable = sqliteTable("collab_session", {
    * unleash-live MCP server with this token + STAGE=cirrus.
    */
   unleash_mcp_token: text(),
+  /**
+   * Whether the Playwright browser-automation MCP is enabled for this session.
+   * Off by default (global opencode.json has enabled:false).  Drivers or
+   * Contributors can toggle it via PUT /collab/session/:id/mcp/playwright.
+   * When true, syncPerSessionMcpConfig writes it into the per-session
+   * .opencode/opencode.json with enabled:true.
+   */
+  playwright_mcp_enabled: integer({ mode: "boolean" }).notNull().default(false),
   /** Cumulative milliseconds this session had an active preview. Incremented each time a preview stops. */
   preview_total_ms: integer().notNull().default(0),
   created_at: integer({ mode: "timestamp_ms" }).notNull(),

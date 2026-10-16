@@ -198,6 +198,28 @@ export function setMcpToken(collabSessionId: string, token: string | null): void
   })
 }
 
+/** Returns whether the Playwright MCP is enabled for this session. */
+export function getPlaywrightEnabled(collabSessionId: string): boolean {
+  return Database.use((db) => {
+    const row = db
+      .select({ playwright_mcp_enabled: CollabSessionTable.playwright_mcp_enabled })
+      .from(CollabSessionTable)
+      .where(eq(CollabSessionTable.id, collabSessionId))
+      .get()
+    return row?.playwright_mcp_enabled ?? false
+  })
+}
+
+/** Set whether the Playwright MCP is enabled for this session. */
+export function setPlaywrightEnabled(collabSessionId: string, enabled: boolean): void {
+  Database.use((db) => {
+    db.update(CollabSessionTable)
+      .set({ playwright_mcp_enabled: enabled })
+      .where(eq(CollabSessionTable.id, collabSessionId))
+      .run()
+  })
+}
+
 export function listCollabSessions(ownerGithubId?: number): CollabSession[] {
   return Database.use((db) => {
     const rows = ownerGithubId

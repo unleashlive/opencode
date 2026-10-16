@@ -296,7 +296,7 @@ function CollabSessionInner(props: { me: Me }) {
         <AddRepoDialog onClose={() => setAddRepoOpen(false)} />
       </Show>
 
-      <Show when={showMcpConfig() && myRole() === "driver"}>
+      <Show when={showMcpConfig() && (myRole() === "driver" || myRole() === "contributor")}>
         <McpConfigDialog onClose={() => setShowMcpConfig(false)} />
       </Show>
 

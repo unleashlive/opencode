@@ -183,6 +183,12 @@ export function runCollabMigrations() {
       db.$client.exec("ALTER TABLE collab_session ADD COLUMN preview_total_ms INTEGER NOT NULL DEFAULT 0")
     }
 
+    // playwright_mcp_enabled — whether the Playwright browser-automation MCP
+    // is enabled for this session.  Off by default; toggled by Driver/Contributor.
+    if (!cols.some((c) => c.name === "playwright_mcp_enabled")) {
+      db.$client.exec("ALTER TABLE collab_session ADD COLUMN playwright_mcp_enabled INTEGER NOT NULL DEFAULT 0")
+    }
+
     // collab_pr_stats — per-repo commit + LOC stats captured at PR push time.
     // One row per successful "Open PR" click per repo per session.
     db.$client.exec(`

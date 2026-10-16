@@ -34,7 +34,7 @@ export function buildOAuthUrl(params: {
   // sees a "this app will have access to your private repositories" consent
   // screen on first sign-in; that's the cost of dropping the long-lived
   // server PAT.
-  url.searchParams.set("scope", (params.scopes ?? ["read:org", "read:user", "user:email", "repo"]).join(" "))
+  url.searchParams.set("scope", (params.scopes ?? ["read:org", "read:user", "user:email", "repo", "read:packages"]).join(" "))
   return url.toString()
 }
 

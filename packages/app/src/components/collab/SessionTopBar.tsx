@@ -180,6 +180,7 @@ function OverflowMenu(props: {
 }) {
   const collab = useCollab()
   const isDriver = () => props.myRole === "driver"
+  const isContributor = () => props.myRole === "contributor"
 
   const [compactState, setCompactState] = createSignal<"idle" | "busy" | "done">("idle")
   const [exportBusy, setExportBusy] = createSignal(false)
@@ -259,7 +260,10 @@ function OverflowMenu(props: {
 
   async function signOut() {
     await fetch("/collab/auth/logout", { method: "POST" })
-    window.location.href = `/collab/auth/github?next=/collab/${collab.session()?.id ?? ""}`
+    // Redirect to the sessions list with ?signed_out=1 so the page shows a
+    // "Sign in with GitHub" button instead of auto-redirecting through OAuth
+    // (which would re-auth silently and look like a page reload).
+    window.location.href = "/collab/new?signed_out=1"
   }
 
   return (
@@ -300,12 +304,14 @@ function OverflowMenu(props: {
             />
           </Show>
 
-          <Show when={isDriver()}>
+          <Show when={isDriver() || isContributor()}>
             <MenuItem
-              label={collab.mcpConfigured() ? "Unleash MCP active" : "Configure MCP"}
-              hint="Unleash Live MCP credentials for this session"
+              label="MCP Connectors"
+              hint="Manage headroom, Playwright, and Unleash Live MCP servers for this session"
               onSelect={() => pick(props.onMcpConfig)}
             />
+          </Show>
+          <Show when={isDriver()}>
             <MenuItem label="Add repository" hint="Clone another repo onto the collab branch" onSelect={() => pick(props.onAddRepo)} />
           </Show>
 
