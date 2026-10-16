@@ -926,13 +926,19 @@ function writeGitHubAuth(token: string): void {
   const home = homedir()
 
   // ── 1. npm/pnpm registry auth ─────────────────────────────────────────────
+  // Prefer the server-side NPM_PACKAGES_TOKEN (a classic PAT with read:packages
+  // + SSO-authorized for the unleashlive org) over the user's OAuth token.
+  // OAuth tokens cannot be SSO-authorized per-user, so they 403 on the private
+  // GitHub Packages registry even when the read:packages scope is present.
+  const npmToken = process.env.NPM_PACKAGES_TOKEN || token
   const npmrcPath = join(home, ".npmrc")
-  const npmrcLine = `//npm.pkg.github.com/:_authToken=${token}`
+  const npmrcLine = `//npm.pkg.github.com/:_authToken=${npmToken}`
   const npmrcTmp = npmrcPath + ".tmp"
   try {
     writeFileSync(npmrcTmp, npmrcLine + "\n", { mode: 0o600 })
     renameSync(npmrcTmp, npmrcPath)
-    console.log("[collab.workspace] wrote GitHub Packages auth to ~/.npmrc")
+    const src = process.env.NPM_PACKAGES_TOKEN ? "server PAT" : "user OAuth token"
+    console.log(`[collab.workspace] wrote GitHub Packages auth to ~/.npmrc (${src})`)
   } catch (err) {
     console.warn("[collab.workspace] could not write ~/.npmrc:", err)
   }
