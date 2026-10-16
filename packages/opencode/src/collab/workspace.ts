@@ -103,7 +103,7 @@ export async function initSessionWorkspace(
   mkdirSync(root, { recursive: true })
 
   // Write npm registry auth so the LLM can `pnpm install` @unleashlive packages.
-  writeNpmrcAuth(userAccessToken)
+  writeGitHubAuth(userAccessToken)
 
   const env = { ...process.env, GIT_TERMINAL_PROMPT: "0" }
   const author = pickCommitAuthor(participants)
@@ -955,9 +955,6 @@ function writeGitHubAuth(token: string): void {
   }
 }
 
-// Backwards-compat alias so existing call sites compile without rename.
-const writeNpmrcAuth = writeGitHubAuth
-
 export async function refreshWorkspaceRemoteTokens(
   collabSessionId: string,
   repos: string[],
@@ -967,7 +964,7 @@ export async function refreshWorkspaceRemoteTokens(
 
   // Refresh npm registry auth alongside git remote URLs so `pnpm install`
   // keeps working after a token rotation.
-  writeNpmrcAuth(userAccessToken)
+  writeGitHubAuth(userAccessToken)
 
   const root = sessionWorkspacePath(collabSessionId)
   for (const repo of repos) {
