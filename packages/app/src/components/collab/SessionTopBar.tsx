@@ -303,8 +303,8 @@ function OverflowMenu(props: {
 
           <Show when={isDriver() || isContributor()}>
             <MenuItem
-              label={collab.mcpConfigured() ? "Unleash MCP active" : "Configure MCP"}
-              hint="Unleash Live MCP credentials for this session"
+              label="MCP Connectors"
+              hint="Manage headroom, Playwright, and Unleash Live MCP servers for this session"
               onSelect={() => pick(props.onMcpConfig)}
             />
           </Show>
