@@ -13,6 +13,7 @@ import { spawn, spawnSync } from "child_process"
 import { mkdirSync, rmSync, existsSync, writeFileSync, renameSync, readdirSync, statSync, unlinkSync } from "fs"
 import { rm as rmAsync, stat as statAsync } from "fs/promises"
 import { join, isAbsolute } from "path"
+import { homedir } from "os"
 import type { Participant } from "@opencode-ai/collab"
 
 /** Run a command asynchronously and resolve/reject when it exits. */
@@ -100,6 +101,9 @@ export async function initSessionWorkspace(
 ): Promise<void> {
   const root = sessionWorkspacePath(collabSessionId)
   mkdirSync(root, { recursive: true })
+
+  // Write npm registry auth so the LLM can `pnpm install` @unleashlive packages.
+  writeNpmrcAuth(userAccessToken)
 
   const env = { ...process.env, GIT_TERMINAL_PROMPT: "0" }
   const author = pickCommitAuthor(participants)
@@ -898,12 +902,73 @@ export async function configureWorkspaceGitIdentity(
  * fresh OAuth token. Call on SSE connect/reconnect so the credential in
  * .git/config never goes stale after a token revoke + reissue. Non-throwing.
  */
+/**
+ * Write (or refresh) the two GitHub auth files the LLM process needs so that
+ * `pnpm install` can resolve both npm-registry and git-hosted dependencies
+ * from private `unleashlive` repos, without requiring GITHUB_TOKEN or
+ * NODE_AUTH_TOKEN in the process environment.
+ *
+ * 1. `~/.npmrc`  — registry auth for `@unleashlive` packages on npm.pkg.github.com
+ *    (picked up automatically when the project .npmrc maps the scope to that registry)
+ *
+ * 2. `~/.git-credentials` + git global config  — HTTPS credentials for git-dep
+ *    clones (e.g. `"ua-gltf-viewer": "github:unleashlive/ua-gltf-viewer"`).
+ *    git's credential-store helper is queried BEFORE GIT_ASKPASS, so it wins
+ *    even though the container has GIT_ASKPASS=/usr/local/bin/git-askpass-token
+ *    baked in (that helper requires GITHUB_TOKEN in env, which isn't set for
+ *    the LLM process).
+ *
+ * Both writes are atomic (tmp + rename) so a concurrent pnpm/git read never
+ * sees a partial file.
+ */
+function writeGitHubAuth(token: string): void {
+  if (!token) return
+  const home = homedir()
+
+  // ── 1. npm/pnpm registry auth ─────────────────────────────────────────────
+  const npmrcPath = join(home, ".npmrc")
+  const npmrcLine = `//npm.pkg.github.com/:_authToken=${token}`
+  const npmrcTmp = npmrcPath + ".tmp"
+  try {
+    writeFileSync(npmrcTmp, npmrcLine + "\n", { mode: 0o600 })
+    renameSync(npmrcTmp, npmrcPath)
+    console.log("[collab.workspace] wrote GitHub Packages auth to ~/.npmrc")
+  } catch (err) {
+    console.warn("[collab.workspace] could not write ~/.npmrc:", err)
+  }
+
+  // ── 2. git HTTPS credential store ────────────────────────────────────────
+  // Format: https://x-access-token:<token>@github.com
+  // git credential-store matches on scheme+host, so this covers any repo
+  // under github.com regardless of org.
+  const credPath = join(home, ".git-credentials")
+  const credLine = `https://x-access-token:${token}@github.com`
+  const credTmp = credPath + ".tmp"
+  try {
+    writeFileSync(credTmp, credLine + "\n", { mode: 0o600 })
+    renameSync(credTmp, credPath)
+    // Configure credential.helper=store globally (idempotent).
+    spawnSync("git", ["config", "--global", "credential.helper", "store"], { stdio: "ignore" })
+    console.log("[collab.workspace] wrote git HTTPS credentials to ~/.git-credentials")
+  } catch (err) {
+    console.warn("[collab.workspace] could not write ~/.git-credentials:", err)
+  }
+}
+
+// Backwards-compat alias so existing call sites compile without rename.
+const writeNpmrcAuth = writeGitHubAuth
+
 export async function refreshWorkspaceRemoteTokens(
   collabSessionId: string,
   repos: string[],
   userAccessToken: string,
 ): Promise<void> {
   if (!userAccessToken) return
+
+  // Refresh npm registry auth alongside git remote URLs so `pnpm install`
+  // keeps working after a token rotation.
+  writeNpmrcAuth(userAccessToken)
+
   const root = sessionWorkspacePath(collabSessionId)
   for (const repo of repos) {
     const name = repo.split("/").pop() ?? repo
