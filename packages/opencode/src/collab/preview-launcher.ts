@@ -62,8 +62,23 @@ import { Database } from "@/storage/db"
  *  Fallback: if oxc-ng is not on PATH (image built without the github_token
  *  secret), change command back to "pnpm run start" via .opencode-preview.json
  *  in the repo. */
+// Shell snippet that skips `pnpm i` when node_modules is already up to date.
+// After a successful install the sha256 of pnpm-lock.yaml is stored in
+// node_modules/.pnpm-lock-hash.  On the next launch, if the hash matches we
+// jump straight to `oxc-ng warm` (fast Vite cache check) saving ~60 s of EFS
+// hardlink churn for the common "restart after code edit" case.
+// oxc-ng warm always runs — it's a no-op when the Vite cache is fresh.
+const INSTALL_CMD = [
+  "{ _H=$(sha256sum pnpm-lock.yaml 2>/dev/null | cut -d' ' -f1);",
+  "if [ -n \"$_H\" ] && [ -f node_modules/.pnpm-lock-hash ]",
+  "&& [ \"$_H\" = \"$(cat node_modules/.pnpm-lock-hash 2>/dev/null)\" ];",
+  "then echo \"[preview] node_modules up to date, skipping pnpm install\";",
+  "else pnpm i --shamefully-hoist=true && echo \"$_H\" > node_modules/.pnpm-lock-hash;",
+  "fi; } && oxc-ng warm . 2>&1 || true",
+].join(" ")
+
 const FRONTEND_DEFAULTS: PreviewConfig = {
-  installCommand: "pnpm i --shamefully-hoist=true && oxc-ng warm . 2>&1 || true",
+  installCommand: INSTALL_CMD,
   command: "command -v oxc-ng >/dev/null 2>&1 && oxc-ng . --port 8080 || pnpm run start",
   port: 8080,
   label: "Unleash live frontend",
