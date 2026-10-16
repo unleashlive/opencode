@@ -49,9 +49,10 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
   const dialog = useDialog()
   const command = useCommand()
   const language = useLanguage()
-  // In the collab embed iframe the model is preset server-side (opencode.json)
-  // and cannot be changed by the user, so hide the selector to keep the bottom
-  // toolbar compact — especially important on narrow mobile viewports.
+  // In the collab embed iframe, hide the variant control (High/Med/Low) —
+  // it adds noise in a shared session. The model selector is restored but
+  // wrapped in a responsive container so it hides on phones (<640px) where
+  // the toolbar row is too narrow and was blocking the send button.
   const collabEmbed = isCollabEmbed()
 
   return (
@@ -64,7 +65,9 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
         attachKeybind={command.keybindParts("file.attach")}
         attachShortcut={command.keybind("file.attach")}
         modelControl={
-          collabEmbed ? undefined : (
+          // Always render in the collab iframe, but hide below sm (640px) to
+          // keep the send button reachable on narrow phone screens.
+          <span class={collabEmbed ? "hidden sm:contents" : "contents"}>
             <PromptInputV2ModelControl
               loading={props.controller.model.loading}
               paid={props.controller.model.paid}
@@ -78,7 +81,7 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
                 dialog.show(() => <DialogSelectModelUnpaidV2 model={props.controller.model.selection} />)
               }
             />
-          )
+          </span>
         }
       />
     </div>
