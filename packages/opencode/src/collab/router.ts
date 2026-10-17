@@ -906,10 +906,9 @@ function handleCollabRequestInner(req: Request): Promise<Response> | Response {
   }
 
   // GET /collab/server/npm-token — returns whether a server-wide GitHub Packages
-  // PAT is configured (never returns the token value itself).  Any auth'd user.
+  // PAT is configured (never returns the token value itself).  No auth required
+  // because this is a non-sensitive boolean — callers can't extract the token.
   if (req.method === "GET" && path === "/collab/server/npm-token") {
-    const sess = getSession(req)
-    if (!sess) return json({ error: "Unauthorised — please authenticate via /collab/auth/github" }, 401)
     const raw = Session.getServerNpmToken()
     return json({ configured: raw !== null }, 200)
   }
@@ -919,7 +918,11 @@ function handleCollabRequestInner(req: Request): Promise<Response> | Response {
   // Any auth'd org member can set this (it replaces whatever was there before).
   if (req.method === "PUT" && path === "/collab/server/npm-token") {
     const sess = getSession(req)
-    if (!sess) return json({ error: "Unauthorised — please authenticate via /collab/auth/github" }, 401)
+    if (!sess)
+      return json(
+        { error: "Session expired — please reload the page and sign in again via GitHub" },
+        401,
+      )
     return handleServerNpmTokenPut(req, sess.githubLogin)
   }
 
