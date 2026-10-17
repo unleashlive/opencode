@@ -137,13 +137,14 @@ export function PreviewLifecycleRow(props: { ctl: PreviewController }) {
               <QuietRow tone="neutral">
                 <Spinner class="size-3.5 shrink-0 text-icon-base" />
                 <span class="shrink-0 text-12-medium text-text-strong">Installing dev server</span>
-                <LogTail lines={s().recentLog.slice(-2)} />
+                <LogTail lines={s().recentLog.slice(-1)} />
                 <Show when={ctl.isDriver()}>
                   <Actions>
                     <TextAction label="Cancel" disabled={ctl.busy()} onClick={ctl.stop} />
                   </Actions>
                 </Show>
               </QuietRow>
+              <LogPanel lines={s().recentLog.slice(-12)} />
             </Show>
 
             <Show when={s().status === "running"}>
@@ -174,7 +175,6 @@ export function PreviewLifecycleRow(props: { ctl: PreviewController }) {
                 <Show when={s().errorMessage}>
                   {(message) => <span class="shrink-0 truncate text-12-regular text-text-base">{message()}</span>}
                 </Show>
-                <LogTail lines={s().recentLog.slice(-2)} />
                 <Actions>
                   <Show
                     when={ctl.isDriver()}
@@ -184,6 +184,7 @@ export function PreviewLifecycleRow(props: { ctl: PreviewController }) {
                   </Show>
                 </Actions>
               </QuietRow>
+              <LogPanel lines={s().recentLog.slice(-20)} tone="critical" />
             </Show>
           </>
         )}
@@ -264,13 +265,46 @@ function QuietRow(props: { tone: "neutral" | "success" | "critical"; children: a
   )
 }
 
-/** The last couple of log lines, inline and clipped — a tail, not a console. */
+/** The last log line, inline and clipped — shown in the status row itself. */
 function LogTail(props: { lines: ReadonlyArray<{ stream: "stdout" | "stderr"; line: string }> }) {
   return (
     <Show when={props.lines.length > 0}>
       <span class="min-w-0 flex-1 truncate font-mono text-[10px] text-text-base" title={props.lines.map((l) => l.line).join("\n")}>
         {props.lines[props.lines.length - 1]!.line.slice(0, 200)}
       </span>
+    </Show>
+  )
+}
+
+/** Multi-line scrollable log panel — shown below the status row during install/failure. */
+function LogPanel(props: {
+  lines: ReadonlyArray<{ stream: "stdout" | "stderr"; line: string }>
+  tone?: "critical"
+}) {
+  return (
+    <Show when={props.lines.length > 0}>
+      <div
+        classList={{
+          "max-h-40 overflow-y-auto border-b px-4 py-2": true,
+          "border-border-critical-base bg-surface-critical-weak": props.tone === "critical",
+          "border-border-weak-base bg-surface-base": props.tone !== "critical",
+        }}
+      >
+        <For each={props.lines}>
+          {(entry) => (
+            <div
+              classList={{
+                "font-mono text-[10px] leading-5 break-all": true,
+                "text-text-critical-base": entry.stream === "stderr" && props.tone === "critical",
+                "text-text-weaker": entry.stream === "stderr" && props.tone !== "critical",
+                "text-text-base": entry.stream === "stdout",
+              }}
+            >
+              {entry.line}
+            </div>
+          )}
+        </For>
+      </div>
     </Show>
   )
 }

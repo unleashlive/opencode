@@ -34,7 +34,8 @@
  */
 
 import { spawn, type ChildProcess } from "child_process"
-import { existsSync, readFileSync, statSync, readdirSync } from "fs"
+import { existsSync, readFileSync, statSync, readdirSync, writeFileSync, renameSync } from "fs"
+import { homedir } from "os"
 import { join } from "path"
 import { repoWorkspacePath } from "./workspace"
 import { previewUrl } from "./preview-host"
@@ -599,6 +600,24 @@ export function launchPreview(
   } else {
     delete env.GITHUB_TOKEN
     delete env.NODE_AUTH_TOKEN
+  }
+
+  // Refresh ~/.npmrc with the best-available npm token so pnpm install can
+  // reach npm.pkg.github.com.  writeGitHubAuth() in workspace.ts wrote a
+  // literal OAuth token at workspace-creation time; the server PAT may have
+  // been saved later.  Overwrite it here so this install always uses the
+  // latest resolved token (DB PAT > env PAT > OAuth token).
+  const npmAuthToken = resolvedNpmToken ?? gitAccessToken
+  if (npmAuthToken) {
+    const npmrcPath = join(homedir(), ".npmrc")
+    try {
+      writeFileSync(npmrcPath + ".tmp", `//npm.pkg.github.com/:_authToken=${npmAuthToken}\n`, {
+        mode: 0o600,
+      })
+      renameSync(npmrcPath + ".tmp", npmrcPath)
+    } catch (e) {
+      console.warn("[collab.preview] could not refresh ~/.npmrc before install:", e)
+    }
   }
 
   let child: ChildProcess
