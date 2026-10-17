@@ -189,6 +189,16 @@ export function runCollabMigrations() {
       db.$client.exec("ALTER TABLE collab_session ADD COLUMN playwright_mcp_enabled INTEGER NOT NULL DEFAULT 0")
     }
 
+    // collab_server_config — server-wide key/value store for admin settings
+    // (e.g. the GitHub Packages classic PAT).  One table per EFS mount so
+    // settings survive task restarts and apply to every collab session.
+    db.$client.exec(`
+      CREATE TABLE IF NOT EXISTS collab_server_config (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
+    `)
+
     // collab_pr_stats — per-repo commit + LOC stats captured at PR push time.
     // One row per successful "Open PR" click per repo per session.
     db.$client.exec(`

@@ -13,6 +13,43 @@ import { BTN_GHOST, BTN_PRIMARY, FIELD, LABEL_MICRO, TEXT_ACTION } from "./ui"
 export function McpConfigDialog(props: { onClose: () => void }) {
   const collab = useCollab()
 
+  // ── GitHub Packages (server-wide npm token) ───────────────────────────────
+  const [npmToken, setNpmToken] = createSignal("")
+  const [npmBusy, setNpmBusy] = createSignal(false)
+  const [npmErr, setNpmErr] = createSignal<string | null>(null)
+  const [npmDone, setNpmDone] = createSignal(false)
+
+  const npmConfigured = () => collab.serverNpmTokenConfigured()
+
+  async function saveNpmToken() {
+    const t = npmToken().trim()
+    if (!t) return
+    setNpmErr(null)
+    setNpmBusy(true)
+    try {
+      await collab.setServerNpmToken(t)
+      setNpmDone(true)
+      setNpmToken("")
+      setTimeout(() => setNpmDone(false), 2000)
+    } catch (e) {
+      setNpmErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setNpmBusy(false)
+    }
+  }
+
+  async function removeNpmToken() {
+    setNpmErr(null)
+    setNpmBusy(true)
+    try {
+      await collab.setServerNpmToken(null)
+    } catch (e) {
+      setNpmErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setNpmBusy(false)
+    }
+  }
+
   // ── Unleash Live ──────────────────────────────────────────────────────────
   const [token, setToken] = createSignal("")
   const [ulBusy, setUlBusy] = createSignal(false)
@@ -117,6 +154,79 @@ export function McpConfigDialog(props: { onClose: () => void }) {
           >
             {pwBusy() ? "…" : playwrightEnabled() ? "Disable" : "Enable"}
           </button>
+        </div>
+
+        {/* ── GitHub Packages (server-wide npm token) ─────────────────────── */}
+        <div class="flex flex-col gap-3 py-4">
+          <div class="flex items-start gap-3">
+            <span
+              class={`mt-0.5 size-2 shrink-0 rounded-full ${npmConfigured() ? "bg-surface-success-strong" : "bg-surface-inset-base"}`}
+              aria-label={npmConfigured() ? "Active" : "Inactive"}
+            />
+            <div class="flex min-w-0 flex-col gap-0.5">
+              <p class="text-12-medium text-text-strong">GitHub Packages</p>
+              <p class="text-[11px] text-text-weak">
+                Server-wide classic PAT for <code class="font-mono">npm.pkg.github.com</code>. Used by all sessions and the preview server to install <code class="font-mono">@unleashlive</code> packages. Must be SSO-authorized for the org.
+              </p>
+            </div>
+            <Show when={npmConfigured()}>
+              <span class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium bg-surface-success-weak text-text-on-success-base">
+                Active
+              </span>
+            </Show>
+          </div>
+
+          <div class="flex flex-col gap-1.5 pl-5">
+            <label class={LABEL_MICRO} for="npm-token">
+              Classic PAT
+            </label>
+            <input
+              id="npm-token"
+              type="password"
+              autocomplete="off"
+              placeholder="ghp_..."
+              class={`${FIELD} font-mono`}
+              value={npmToken()}
+              onInput={(e) => setNpmToken(e.currentTarget.value)}
+              onKeyDown={(e) => e.key === "Enter" && void saveNpmToken()}
+            />
+            <p class="text-[11px] text-text-base">
+              Needs <code class="font-mono">read:packages</code> scope and SSO authorization for the <code class="font-mono">unleashlive</code> org.
+            </p>
+          </div>
+
+          <Show when={npmErr()}>
+            <p class="ml-5 rounded-md border border-border-critical-base bg-surface-critical-weak px-3 py-2 text-12-regular text-text-on-critical-base">
+              {npmErr()}
+            </p>
+          </Show>
+
+          <Show when={npmDone()}>
+            <p class="ml-5 text-12-regular text-text-on-success-base">Saved — GitHub Packages auth active.</p>
+          </Show>
+
+          <div class="flex items-center gap-2 pl-5">
+            <Show when={npmConfigured()}>
+              <button
+                type="button"
+                disabled={npmBusy()}
+                onClick={() => void removeNpmToken()}
+                class={`${TEXT_ACTION} text-text-on-critical-base hover:text-text-on-critical-strong`}
+              >
+                Remove token
+              </button>
+            </Show>
+            <div class="ml-auto flex gap-2">
+              <button
+                type="button"
+                disabled={npmBusy() || !npmToken().trim()}
+                onClick={() => void saveNpmToken()}
+                class={`${BTN_PRIMARY} h-8 px-3`}
+              >
+                {npmBusy() ? "Saving…" : "Save token"}
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* ── Unleash Live (token) ─────────────────────────────────────────── */}

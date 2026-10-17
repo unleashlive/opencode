@@ -40,6 +40,8 @@ import { repoWorkspacePath } from "./workspace"
 import { previewUrl } from "./preview-host"
 import type { CollabEvent } from "@opencode-ai/collab"
 import { Database } from "@/storage/db"
+import { getServerNpmToken } from "./session"
+import { decryptToken } from "./crypto"
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
@@ -574,9 +576,26 @@ export function launchPreview(
   //     Required for @unleashlive-scoped packages published to GitHub Packages.
   // Both live only in this child's env; cleared globally so unauthenticated
   // pnpm installs elsewhere don't accidentally inherit them.
+  // Resolve the best available npm token — priority:
+  //   1. DB-stored server PAT (set via MCP Connectors dialog; SSO-authorized)
+  //   2. NPM_PACKAGES_TOKEN env var  (injected at deploy time)
+  //   3. user OAuth token (may 403 on SAML-SSO-gated org registries)
+  let resolvedNpmToken: string | null | undefined = gitAccessToken
+  const encryptedDbNpmToken = getServerNpmToken()
+  if (encryptedDbNpmToken) {
+    try {
+      const secret = process.env["SESSION_SECRET"] ?? ""
+      const decrypted = decryptToken(encryptedDbNpmToken, secret)
+      if (decrypted) resolvedNpmToken = decrypted
+    } catch {
+      // fall through to env/OAuth token
+    }
+  } else if (process.env.NPM_PACKAGES_TOKEN) {
+    resolvedNpmToken = process.env.NPM_PACKAGES_TOKEN
+  }
   if (gitAccessToken) {
     env.GITHUB_TOKEN = gitAccessToken
-    env.NODE_AUTH_TOKEN = gitAccessToken
+    env.NODE_AUTH_TOKEN = (resolvedNpmToken || gitAccessToken) as string
   } else {
     delete env.GITHUB_TOKEN
     delete env.NODE_AUTH_TOKEN

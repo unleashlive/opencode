@@ -89,10 +89,14 @@ interface CollabContextValue {
   mcpConfigured: () => boolean
   /** Whether the Playwright browser-automation MCP is enabled for this session. */
   mcpPlaywrightEnabled: () => boolean
+  /** Whether the server-wide GitHub Packages PAT is configured. */
+  serverNpmTokenConfigured: () => boolean
   /** Driver or Contributor: save (token=string) or clear (token=null) the Unleash Live PAT. */
   configureMcp: (token: string | null) => Promise<void>
   /** Driver or Contributor: toggle Playwright MCP on/off. */
   togglePlaywright: (enabled: boolean) => Promise<void>
+  /** Save (token=string) or clear (token=null) the server-wide GitHub Packages PAT. */
+  setServerNpmToken: (token: string | null) => Promise<void>
   /** Driver-only: append repos to a session (at create-time recovery or mid-
    *  session via the "+ Add" control).  Returns the actually-new repos
    *  (existing ones are skipped) plus any per-repo branch-collision warnings. */
@@ -218,6 +222,7 @@ export function CollabProvider(props: CollabProviderProps) {
   const [activityLog, setActivityLog] = createSignal<CollabActivityEvent[]>([])
   const [mcpConfiguredState, setMcpConfiguredState] = createSignal(false)
   const [mcpPlaywrightEnabled, setMcpPlaywrightEnabled] = createSignal(false)
+  const [serverNpmTokenConfiguredState, setServerNpmTokenConfiguredState] = createSignal(false)
   // Frontend live-preview state — null when no preview is running.  Server
   // broadcasts a "started" event on SSE (re)connect when one IS running, so
   // the SPA picks up the state on full page reloads too.  Backed up by a
@@ -390,6 +395,15 @@ export function CollabProvider(props: CollabProviderProps) {
       setMcpPlaywrightEnabled(Boolean(data.servers?.playwright?.enabled))
     } catch {
       // ignore — treat as not configured
+    }
+    try {
+      const res = await fetch("/collab/server/npm-token")
+      if (res.ok) {
+        const data = (await res.json()) as { configured: boolean }
+        setServerNpmTokenConfiguredState(Boolean(data.configured))
+      }
+    } catch {
+      // ignore
     }
   })
 
@@ -853,6 +867,7 @@ export function CollabProvider(props: CollabProviderProps) {
     },
     mcpConfigured: mcpConfiguredState,
     mcpPlaywrightEnabled: mcpPlaywrightEnabled,
+    serverNpmTokenConfigured: serverNpmTokenConfiguredState,
     async configureMcp(token) {
       await api("/mcp", "PUT", { token: token ?? null })
       setMcpConfiguredState(token !== null && token !== "")
@@ -860,6 +875,18 @@ export function CollabProvider(props: CollabProviderProps) {
     async togglePlaywright(enabled) {
       await api("/mcp/playwright", "PUT", { enabled })
       setMcpPlaywrightEnabled(enabled)
+    },
+    async setServerNpmToken(token) {
+      const res = await fetch("/collab/server/npm-token", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: token ?? null }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as { error?: string }
+        throw new Error(err?.error ?? `HTTP ${res.status}`)
+      }
+      setServerNpmTokenConfiguredState(token !== null && token !== "")
     },
     async addRepos(repos) {
       const res = await api("", "PATCH", { repos })

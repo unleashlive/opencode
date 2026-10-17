@@ -190,7 +190,8 @@ jobs:
           # the next deploy runs, the entrypoint's "EFS path is
           # writable" log line confirms whether the access point uid
           # also needs fixing.
-          jq --arg img "${{ steps.img.outputs.sha_image }}" '
+          jq --arg img "${{ steps.img.outputs.sha_image }}" \
+             --arg npm_token "${{ secrets.COLLAB_NPM_READ_TOKEN }}" '
             .containerDefinitions[0].image = $img
             | .cpu = "4096"
             | .memory = "16384"
@@ -199,6 +200,10 @@ jobs:
                 then .containerPath = "/home/opencode/.local/share/opencode"
                 else .
                 end
+              )
+            | .containerDefinitions[0].environment |= (
+                (. // []) | map(select(.name != "NPM_PACKAGES_TOKEN"))
+                + (if $npm_token != "" then [{"name":"NPM_PACKAGES_TOKEN","value":$npm_token}] else [] end)
               )
             | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                   .compatibilities, .registeredAt, .registeredBy)

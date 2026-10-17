@@ -26,6 +26,8 @@
  *   GET  /collab/session/:id/preview/state     → snapshot of the running preview
  *   GET  /collab/claude-creds/status     → does the container have Claude auth?
  *   POST /collab/claude-creds            → upload a fresh Claude credentials JSON
+ *   GET  /collab/server/npm-token        → is a server-wide GitHub Packages PAT configured?
+ *   PUT  /collab/server/npm-token        → save or clear the server-wide GitHub Packages PAT
  */
 
 import { randomBytes } from "crypto"
@@ -903,6 +905,24 @@ function handleCollabRequestInner(req: Request): Promise<Response> | Response {
     return handleClaudeCredsUpload(req)
   }
 
+  // GET /collab/server/npm-token — returns whether a server-wide GitHub Packages
+  // PAT is configured (never returns the token value itself).  Any auth'd user.
+  if (req.method === "GET" && path === "/collab/server/npm-token") {
+    const sess = getSession(req)
+    if (!sess) return json({ error: "Unauthorised — please authenticate via /collab/auth/github" }, 401)
+    const raw = Session.getServerNpmToken()
+    return json({ configured: raw !== null }, 200)
+  }
+
+  // PUT /collab/server/npm-token — save or clear the server-wide GitHub Packages PAT.
+  // Body: { token: string } to set, or { token: null | "" } to clear.
+  // Any auth'd org member can set this (it replaces whatever was there before).
+  if (req.method === "PUT" && path === "/collab/server/npm-token") {
+    const sess = getSession(req)
+    if (!sess) return json({ error: "Unauthorised — please authenticate via /collab/auth/github" }, 401)
+    return handleServerNpmTokenPut(req, sess.githubLogin)
+  }
+
   // POST /collab/auth/logout — invalidate current session cookie
   if (req.method === "POST" && path === "/collab/auth/logout") {
     const cookie = parseCookies(req.headers.get("cookie") ?? "")
@@ -1105,6 +1125,21 @@ function parseOAuthState(state: string | null): OAuthStatePayload | null {
     if (parsed && typeof parsed === "object" && typeof parsed.n === "string") return parsed
   } catch {}
   return null
+}
+
+async function handleServerNpmTokenPut(req: Request, githubLogin: string): Promise<Response> {
+  const body = await req.json().catch(() => null)
+  const rawToken = body?.token
+  const secret = process.env["SESSION_SECRET"] ?? ""
+  if (rawToken && typeof rawToken === "string") {
+    const encrypted = encryptToken(rawToken, secret)
+    Session.setServerNpmToken(encrypted)
+    console.log("[collab.server] npm token saved by", githubLogin)
+  } else {
+    Session.setServerNpmToken(null)
+    console.log("[collab.server] npm token cleared by", githubLogin)
+  }
+  return json({ ok: true }, 200)
 }
 
 async function handleClaudeCredsUpload(req: Request): Promise<Response> {

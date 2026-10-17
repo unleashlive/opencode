@@ -220,6 +220,33 @@ export function setPlaywrightEnabled(collabSessionId: string, enabled: boolean):
   })
 }
 
+// ── Server-wide GitHub Packages npm token ────────────────────────────────────
+// Stored in collab_server_config (key = "npm_packages_token"), encrypted.
+// This is a single server-global value — not per-session.
+
+/** Returns the raw (possibly encrypted) server npm token, or null if not set. */
+export function getServerNpmToken(): string | null {
+  return Database.use((db) => {
+    const row = db.$client
+      .prepare(`SELECT value FROM collab_server_config WHERE key = 'npm_packages_token'`)
+      .get() as { value: string } | undefined
+    return row?.value ?? null
+  })
+}
+
+/** Persist the server npm token (should be pre-encrypted by the caller). */
+export function setServerNpmToken(token: string | null): void {
+  Database.use((db) => {
+    if (token === null) {
+      db.$client.prepare(`DELETE FROM collab_server_config WHERE key = 'npm_packages_token'`).run()
+    } else {
+      db.$client
+        .prepare(`INSERT INTO collab_server_config (key, value) VALUES ('npm_packages_token', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`)
+        .run(token)
+    }
+  })
+}
+
 export function listCollabSessions(ownerGithubId?: number): CollabSession[] {
   return Database.use((db) => {
     const rows = ownerGithubId
