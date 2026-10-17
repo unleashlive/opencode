@@ -15,6 +15,8 @@ import { rm as rmAsync, stat as statAsync } from "fs/promises"
 import { join, isAbsolute } from "path"
 import { homedir } from "os"
 import type { Participant } from "@opencode-ai/collab"
+import { getServerNpmToken } from "./session"
+import { decryptToken } from "./crypto"
 
 /** Run a command asynchronously and resolve/reject when it exits. */
 function runAsync(cmd: string, args: string[], opts: { env?: NodeJS.ProcessEnv; cwd?: string } = {}): Promise<void> {
@@ -926,19 +928,37 @@ function writeGitHubAuth(token: string): void {
   const home = homedir()
 
   // ── 1. npm/pnpm registry auth ─────────────────────────────────────────────
-  // Prefer the server-side NPM_PACKAGES_TOKEN (a classic PAT with read:packages
-  // + SSO-authorized for the unleashlive org) over the user's OAuth token.
-  // OAuth tokens cannot be SSO-authorized per-user, so they 403 on the private
-  // GitHub Packages registry even when the read:packages scope is present.
-  const npmToken = process.env.NPM_PACKAGES_TOKEN || token
+  // Token priority (highest → lowest):
+  //   1. DB-stored server npm token (set via MCP Connectors dialog — classic PAT, SSO-authorized)
+  //   2. NPM_PACKAGES_TOKEN env var  (injected by ECS task definition at deploy time)
+  //   3. user OAuth token            (fallback; may 403 on SAML-SSO-gated orgs)
+  let npmToken: string = token
+  let npmSrc = "user OAuth token"
+  const encryptedDbToken = getServerNpmToken()
+  if (encryptedDbToken) {
+    try {
+      const secret = process.env["SESSION_SECRET"] ?? ""
+      const decrypted = decryptToken(encryptedDbToken, secret)
+      if (decrypted) {
+        npmToken = decrypted
+        npmSrc = "DB server PAT"
+      } else {
+        console.warn("[collab.workspace] server npm token decrypted to null; falling back")
+      }
+    } catch {
+      console.warn("[collab.workspace] could not decrypt server npm token from DB; falling back")
+    }
+  } else if (process.env.NPM_PACKAGES_TOKEN) {
+    npmToken = process.env.NPM_PACKAGES_TOKEN
+    npmSrc = "env server PAT"
+  }
   const npmrcPath = join(home, ".npmrc")
   const npmrcLine = `//npm.pkg.github.com/:_authToken=${npmToken}`
   const npmrcTmp = npmrcPath + ".tmp"
   try {
     writeFileSync(npmrcTmp, npmrcLine + "\n", { mode: 0o600 })
     renameSync(npmrcTmp, npmrcPath)
-    const src = process.env.NPM_PACKAGES_TOKEN ? "server PAT" : "user OAuth token"
-    console.log(`[collab.workspace] wrote GitHub Packages auth to ~/.npmrc (${src})`)
+    console.log(`[collab.workspace] wrote GitHub Packages auth to ~/.npmrc (${npmSrc})`)
   } catch (err) {
     console.warn("[collab.workspace] could not write ~/.npmrc:", err)
   }
