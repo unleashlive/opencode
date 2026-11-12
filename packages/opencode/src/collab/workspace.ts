@@ -10,7 +10,7 @@
  */
 
 import { spawn, spawnSync } from "child_process"
-import { mkdirSync, rmSync, existsSync, writeFileSync, renameSync, readdirSync, statSync, unlinkSync } from "fs"
+import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync, renameSync, readdirSync, statSync, unlinkSync } from "fs"
 import { rm as rmAsync, stat as statAsync } from "fs/promises"
 import { join, isAbsolute } from "path"
 import { homedir } from "os"
@@ -182,7 +182,81 @@ export async function initSessionWorkspace(
     // (Re)install the collab commit hook every time — covers fresh clones
     // and existing checkouts that pre-date the feature.
     installCollabCommitHook(dest, collabSessionId, sessionName, repo, branch)
+
+    // Install packages in the background so the LLM workspace has node_modules
+    // available (tsc, lint, etc.) without blocking session init.  Uses the same
+    // lockfile-hash optimisation as the preview server: a 60 s EFS install is
+    // skipped when pnpm-lock.yaml hasn't changed since the last install.
+    backgroundWorkspaceSetup(dest, env)
   }
+}
+
+/**
+ * Run package install and optional project setup in the background after a
+ * workspace is cloned or refreshed.  Non-blocking — session init returns
+ * immediately; install runs async and logs progress.
+ *
+ * Uses the same lockfile-hash shortcut as the preview server: once packages
+ * are installed, subsequent calls that find an unchanged pnpm-lock.yaml hash
+ * skip the 60 s EFS hardlink step and return in milliseconds.
+ *
+ * Also detects and runs `tools/install_packages.sh` when present, which the
+ * unleashlive frontend repos use for additional dev-environment setup.
+ */
+function backgroundWorkspaceSetup(repoPath: string, env: NodeJS.ProcessEnv): void {
+  void (async () => {
+    const tag = `[collab.workspace] ${repoPath.split("/").slice(-2).join("/")}`
+    try {
+      if (!existsSync(join(repoPath, "pnpm-lock.yaml"))) return
+
+      // Lockfile-hash check — matches the INSTALL_CMD in preview-launcher.ts.
+      const lockHash = (() => {
+        const r = spawnSync("sha256sum", ["pnpm-lock.yaml"], { cwd: repoPath, encoding: "utf8" })
+        return r.status === 0 ? r.stdout.split(" ")[0]?.trim() : null
+      })()
+      const hashFile = join(repoPath, "node_modules", ".pnpm-lock-hash")
+      let storedHash: string | null = null
+      if (existsSync(hashFile)) {
+        try {
+          storedHash = readFileSync(hashFile, "utf8").trim()
+        } catch {
+          // non-fatal
+        }
+      }
+
+      if (lockHash && lockHash === storedHash) {
+        console.log(`${tag}: node_modules up to date, skipping install`)
+      } else {
+        // Prefer the project's own setup script when present (e.g.
+        // tools/install_packages.sh in the unleashlive frontend repos — it
+        // runs pnpm install plus any extra post-install steps).  Fall back to
+        // plain pnpm install for repos that don't have one.
+        const setupScript = join(repoPath, "tools", "install_packages.sh")
+        if (existsSync(setupScript)) {
+          console.log(`${tag}: running tools/install_packages.sh…`)
+          await runAsync("sh", [setupScript], { cwd: repoPath, env })
+          console.log(`${tag}: tools/install_packages.sh done`)
+        } else {
+          console.log(`${tag}: installing packages…`)
+          await runAsync("pnpm", ["install", "--shamefully-hoist=true"], { cwd: repoPath, env })
+          console.log(`${tag}: packages installed`)
+        }
+        // Write hash so the next init skips the install when pnpm-lock.yaml
+        // hasn't changed — same optimisation used by the preview server.
+        if (lockHash) {
+          try {
+            writeFileSync(hashFile, lockHash)
+          } catch {
+            // non-fatal — hash file is an optimisation only
+          }
+        }
+      }
+    } catch (err) {
+      // Non-fatal: the LLM can still code without node_modules; the first
+      // preview server launch will install them on-demand.
+      console.error(`${tag}: background setup failed:`, err)
+    }
+  })()
 }
 
 /**
